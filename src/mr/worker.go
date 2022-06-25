@@ -34,7 +34,7 @@ func Worker(mapf func(string, string) []KeyValue,
 	// Your worker implementation here.
 
 	// uncomment to send the Example RPC to the coordinator.
-	// CallExample()
+	CallGetMJob()
 
 }
 
@@ -66,6 +66,26 @@ func CallExample() {
 		fmt.Printf("call failed!\n")
 	}
 }
+
+func CallGetMJob() {
+	
+	args :=ExampleArgs{}
+
+	reply :=MapJobReply{}
+
+
+	ok :=call("Coordinator.GetMJob", &args, &reply)
+	if ok {
+		// reply.Y should be 100.
+		fmt.Printf("reply.Index %v\n", reply.Index)
+	} else {
+		fmt.Printf("call failed!\n")
+	}
+}
+
+
+
+
 
 //
 // send an RPC request to the coordinator, wait for the response.
