@@ -44,7 +44,7 @@ func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
 func (c *Coordinator) GetMJob(args *ExampleArgs, reply *MapJobReply) error {
 	reply.Index = c.items.offset
 	reply.File = c.items.name
-	reply.Length = c.items.Length
+	reply.Length = c.items.length
 	return nil
 }
 

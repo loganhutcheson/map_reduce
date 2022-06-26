@@ -27,7 +27,7 @@ type ExampleReply struct {
 type MapJobReply struct {
 	File string
 	Index int
-	Length int
+	Length int64
 }
 
 // Cook up a unique-ish UNIX-domain socket name

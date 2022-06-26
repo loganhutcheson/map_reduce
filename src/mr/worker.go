@@ -4,7 +4,10 @@ import "fmt"
 import "log"
 import "net/rpc"
 import "hash/fnv"
-
+import "io/ioutil"
+import "os"
+import "encoding/json"
+import "bytes"
 
 //
 // Map functions return a slice of KeyValue.
@@ -31,56 +34,52 @@ func ihash(key string) int {
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
-	// Your worker implementation here.
+	// Get the file name from the coordinator
+	filename := CallGetMJob()
 
-	// uncomment to send the Example RPC to the coordinator.
-	CallGetMJob()
+	content, err := ioutil.ReadFile(filename)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Pass the filename and context to the Map function
+	keyvalue_array :=	mapf(filename, string(content))
+
+
+	// Encode the KeyValue struct into a Bytes array
+	reqBodyBytes := new (bytes.Buffer)
+	json.NewEncoder(reqBodyBytes).Encode(keyvalue_array)
+	fmt.Println("Done.")
+
+	// Store intermediate data
+	temp_filename := fmt.Sprintf("%s_temp", filename)
+	os.WriteFile(temp_filename, reqBodyBytes.Bytes(), 0644)
+
+	// TODO - Notify Coordinator this job is done.
+
 
 }
 
-//
-// example function to show how to make an RPC call to the coordinator.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-func CallExample() {
-
-	// declare an argument structure.
+func CallGetMJob() string {
+	
+	// TODO - Fix the Request ARGS
 	args := ExampleArgs{}
 
-	// fill in the argument(s).
-	args.X = 99
-
-	// declare a reply structure.
-	reply := ExampleReply{}
-
-	// send the RPC request, wait for the reply.
-	// the "Coordinator.Example" tells the
-	// receiving server that we'd like to call
-	// the Example() method of struct Coordinator.
-	ok := call("Coordinator.Example", &args, &reply)
-	if ok {
-		// reply.Y should be 100.
-		fmt.Printf("reply.Y %v\n", reply.Y)
-	} else {
-		fmt.Printf("call failed!\n")
-	}
-}
-
-func CallGetMJob() {
-	
-	args :=ExampleArgs{}
-
-	reply :=MapJobReply{}
+	reply := MapJobReply{}
 
 
 	ok :=call("Coordinator.GetMJob", &args, &reply)
 	if ok {
-		// reply.Y should be 100.
-		fmt.Printf("reply.Index %v\n", reply.Index)
+		// Print the returned input_data information
+		fmt.Printf("This worker is assigned\n "+
+		"File: %s, Filesize: %v, Index %v ", 
+		reply.File, reply.Length, reply.Index)
+		return reply.File
+
 	} else {
 		fmt.Printf("call failed!\n")
 	}
+	return ""
 }
 
 
