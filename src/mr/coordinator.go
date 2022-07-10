@@ -7,10 +7,9 @@ import "net/rpc"
 import "net/http"
 
 import "fmt"
-
+import "time"
 
 type Coordinator struct {
-	// Your definitions here.
 	items	input_data
 }
 
@@ -22,34 +21,35 @@ type input_data struct {
 }
 
 
-
-// Your code here -- RPC handlers for the worker to call.
-
-//
-// an example RPC handler.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
-	reply.Y = args.X + 1
-	return nil
-}
-
-
-
 //
 // assign a worker a map job.
 //
 //
-func (c *Coordinator) GetMJob(args *ExampleArgs, reply *MapJobReply) error {
-	reply.Index = c.items.offset
+func (c *Coordinator) GetMJob(arg *IntArg, reply *MapJobReply) error {
+		fmt.Println(" received MJOB request")
+		reply.Index = c.items.offset
 	reply.File = c.items.name
 	reply.Length = c.items.length
 	return nil
 }
 
+//
+// get the confirmation from the Worker that a job is done
+//
+//
+func (c *Coordinator) WorkerDone(args *NotifyDoneArgs, reply *IntReply) error {
+	// Check if Job was OK
+	if args.Status != 0 {
+		fmt.Println("Job Failed")
+		// TODO mark job failed
+	}
 
+	// TODO Store the temp files in master data
+	// and mark the job as completed
+	reply.Status = 0;
+	return nil
 
+}
 
 //
 // start a thread that listens for RPCs from worker.go
@@ -68,14 +68,14 @@ func (c *Coordinator) server() {
 }
 
 //
-// main/mrcoordina	tor.go calls Done() periodically to find out
+// main/mrcoordiator.go calls Done() periodically to find out
 // if the entire job has finished.
 //
 func (c *Coordinator) Done() bool {
 	ret := false
-
-	// Your code here.
-
+	/* done_time - the period to wait between Done() */
+	time.Sleep(5 * time.Second)
+	fmt.Println("Jobs not done");
 
 	return ret
 }
@@ -120,6 +120,13 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 
 	fmt.Println("Ready to assign map jobs.")
+	// Thread that listens for Jobs
 	c.server()
+
+	// Done calls periodically
+	for {
+		c.Done()
+	}
+
 	return &c
 }

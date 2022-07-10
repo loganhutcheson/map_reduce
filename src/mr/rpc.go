@@ -9,26 +9,32 @@ package mr
 import "os"
 import "strconv"
 
-//
-// example to show how to declare the arguments
-// and reply for an RPC.
-//
-
-type ExampleArgs struct {
-	X int
+// A simple Integer argument
+type IntArg struct {
+	Status int
 }
 
-type ExampleReply struct {
-	Y int
+// A simple Integer reply, used for confirmation
+type IntReply struct {
+	Status int
 }
 
-// Add your RPC definitions here.
-
+// The Coordinate replies with Map Job request
+// and gives details on the job to perform.
 type MapJobReply struct {
 	File string
 	Index int
 	Length int64
 }
+
+// The worker must notify the Coordinator
+// that the map/reduce is done and where the
+// intermediate files are located.
+type NotifyDoneArgs struct {
+	Status int
+	Location string
+}
+
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the coordinator.

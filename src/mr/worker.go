@@ -45,30 +45,26 @@ func Worker(mapf func(string, string) []KeyValue,
 	// Pass the filename and context to the Map function
 	keyvalue_array :=	mapf(filename, string(content))
 
-
 	// Encode the KeyValue struct into a Bytes array
 	reqBodyBytes := new (bytes.Buffer)
 	json.NewEncoder(reqBodyBytes).Encode(keyvalue_array)
-	fmt.Println("Done.")
 
 	// Store intermediate data
 	temp_filename := fmt.Sprintf("%s_temp", filename)
 	os.WriteFile(temp_filename, reqBodyBytes.Bytes(), 0644)
-
-	// TODO - Notify Coordinator this job is done.
-
+	// Notify coordinator job is done
+	ok := CallNotifyDone()
+	if ok != 0 {
+		log.Fatal(err)
+	}
 
 }
 
+// ask the coordinator for a map job
 func CallGetMJob() string {
-	
-	// TODO - Fix the Request ARGS
-	args := ExampleArgs{}
-
+	arg := IntArg{}
 	reply := MapJobReply{}
-
-
-	ok :=call("Coordinator.GetMJob", &args, &reply)
+	ok := call("Coordinator.GetMJob", &arg, &reply)
 	if ok {
 		// Print the returned input_data information
 		fmt.Printf("This worker is assigned\n "+
@@ -77,12 +73,25 @@ func CallGetMJob() string {
 		return reply.File
 
 	} else {
+		fmt.Println("Worker MJOB call not OK")
 		fmt.Printf("call failed!\n")
 	}
 	return ""
 }
 
+// notify the coordinator that the job is done
+func CallNotifyDone() int {
+	args := NotifyDoneArgs{}
+	reply := IntReply{}
+	ok := call("Coordinator.WorkerDone", &args, &reply)
 
+	if ok {
+		return reply.Status
+	} else {
+		fmt.Printf("call failed!\n")
+	}
+	return -1
+}
 
 
 
@@ -99,7 +108,6 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 		log.Fatal("dialing:", err)
 	}
 	defer c.Close()
-
 	err = c.Call(rpcname, args, reply)
 	if err == nil {
 		return true
