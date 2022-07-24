@@ -10,15 +10,21 @@ import "fmt"
 import "time"
 
 type Coordinator struct {
-	items	input_data
+	jobs	map_jobs
 }
 
-type input_data struct {
-	length	int64
-	offset	int
-	name	string
-
+type map_jobs struct {
+	next *map_jobs
+	job_id	int				// incremented from 1
+	length	int64			// total length of file
+	offset	int				// offset in file
+	name	string			// file name
+	status int 				// -1 = failed or unassigned, 0 = assigned, 1 = completed
+	file_location string	// not set until Job done
 }
+
+// global head variable of the map_jobs
+var head *map_jobs
 
 
 //
@@ -26,10 +32,17 @@ type input_data struct {
 //
 //
 func (c *Coordinator) GetMJob(arg *IntArg, reply *MapJobReply) error {
-		fmt.Println(" received MJOB request")
-		reply.Index = c.items.offset
-	reply.File = c.items.name
-	reply.Length = c.items.length
+
+	fmt.Println(" received MJOB request")
+	if c.jobs == (map_jobs{}) {
+		fmt.Println(" no more map jobs to give")
+		return nil
+	}
+	reply.JobId = c.jobs.job_id
+	reply.Index = c.jobs.offset
+	reply.File = c.jobs.name
+	reply.Length = c.jobs.length
+	c.jobs = *c.jobs.next
 	return nil
 }
 
@@ -38,14 +51,21 @@ func (c *Coordinator) GetMJob(arg *IntArg, reply *MapJobReply) error {
 //
 //
 func (c *Coordinator) WorkerDone(args *NotifyDoneArgs, reply *IntReply) error {
-	// Check if Job was OK
-	if args.Status != 0 {
-		fmt.Println("Job Failed")
-		reply.Status = 1;
-	}
 
-	// TODO Store the temp files in master data
-	// and mark the job as completed
+
+	fmt.Printf("\nWorker is done %v", args.JobId)
+
+	// Iterate over the map_jobs to find matching job and store its location
+	jobs := head
+	if jobs.next != nil {
+		if (jobs.job_id == args.JobId) {
+			jobs.status = args.Status
+			jobs.file_location = args.Location
+			return nil
+		}
+		jobs = jobs.next
+	}
+	// Notify worker we got its data, it can die
 	reply.Status = 0;
 	return nil
 
@@ -76,6 +96,9 @@ func (c *Coordinator) Done() bool {
 	/* done_time - the period to wait between Done() */
 	time.Sleep(5 * time.Second)
 
+
+	// TODO - Iterate over the map_jobs list and check status of jobs
+
 	return ret
 }
 
@@ -103,11 +126,13 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		if err != nil {
   			// Could not obtain stat, handle error
 		}
-
 		fmt.Printf(" %d bytes \n", fi.Size())
-		// Store the input_data in the coordinator class
-		item := input_data{fi.Size(), 0, s}
-		c.items = item
+		// Store the map_jobs in the coordinator class
+		item := map_jobs{nil, i, fi.Size(), 0, s, -1, ""}
+		c.jobs.next = &item
+		if i == 0 {
+			head = &c.jobs
+		}
 		split_size := int64(10000)		
 		num_parts := item.length / split_size
 		fmt.Println(num_parts)

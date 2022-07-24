@@ -22,6 +22,7 @@ type IntReply struct {
 // The Coordinate replies with Map Job request
 // and gives details on the job to perform.
 type MapJobReply struct {
+	JobId int
 	File string
 	Index int
 	Length int64
@@ -31,6 +32,7 @@ type MapJobReply struct {
 // that the map/reduce is done and where the
 // intermediate files are located.
 type NotifyDoneArgs struct {
+	JobId int
 	Status int
 	Location string
 }

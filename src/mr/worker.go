@@ -37,7 +37,7 @@ func Worker(mapf func(string, string) []KeyValue,
 	status := 0
 
 	// Get the file name from the coordinator
-	filename := CallGetMJob()
+	job_id, filename := CallGetMJob()
 
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
@@ -59,7 +59,7 @@ func Worker(mapf func(string, string) []KeyValue,
 	}
 
 	// Notify coordinator job is done
-	ok := CallNotifyDone(status)
+	ok := CallNotifyDone(job_id, status)
 	if ok != 0 {
 		log.Fatal(err)
 	}
@@ -67,29 +67,30 @@ func Worker(mapf func(string, string) []KeyValue,
 }
 
 // ask the coordinator for a map job
-func CallGetMJob() string {
+func CallGetMJob() (int, string) {
 	arg := IntArg{}
 	reply := MapJobReply{}
 	ok := call("Coordinator.GetMJob", &arg, &reply)
 	if ok {
 		// Print the returned input_data information
 		fmt.Printf("This worker is assigned\n "+
-		"File: %s, Filesize: %v, Index %v ", 
-		reply.File, reply.Length, reply.Index)
-		return reply.File
+		"JobId: %v File: %s, Filesize: %v, Index %v ",
+		reply.JobId, reply.File, reply.Length, reply.Index)
+		return reply.JobId, reply.File
 
 	} else {
 		fmt.Println("Worker MJOB call not OK")
 		fmt.Printf("call failed!\n")
 	}
-	return ""
+	return -1, ""
 }
 
 // notify the coordinator that the job is done
-func CallNotifyDone(status int) int {
+func CallNotifyDone(job_id int, status int) int {
 	args := NotifyDoneArgs{}
 	reply := IntReply{}
 
+	args.JobId = job_id
 	args.Status = status
 	ok := call("Coordinator.WorkerDone", &args, &reply)
 
