@@ -34,12 +34,14 @@ func ihash(key string) int {
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
+	status := 0
+
 	// Get the file name from the coordinator
 	filename := CallGetMJob()
 
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
-		log.Fatal(err)
+		status = -1
 	}
 
 	// Pass the filename and context to the Map function
@@ -51,9 +53,13 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	// Store intermediate data
 	temp_filename := fmt.Sprintf("%s_temp", filename)
-	os.WriteFile(temp_filename, reqBodyBytes.Bytes(), 0644)
+	err = os.WriteFile(temp_filename, reqBodyBytes.Bytes(), 0644)
+	if err != nil {
+		status = -1
+	}
+
 	// Notify coordinator job is done
-	ok := CallNotifyDone()
+	ok := CallNotifyDone(status)
 	if ok != 0 {
 		log.Fatal(err)
 	}
@@ -80,9 +86,11 @@ func CallGetMJob() string {
 }
 
 // notify the coordinator that the job is done
-func CallNotifyDone() int {
+func CallNotifyDone(status int) int {
 	args := NotifyDoneArgs{}
 	reply := IntReply{}
+
+	args.Status = status
 	ok := call("Coordinator.WorkerDone", &args, &reply)
 
 	if ok {

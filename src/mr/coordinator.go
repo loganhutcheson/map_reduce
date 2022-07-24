@@ -41,7 +41,7 @@ func (c *Coordinator) WorkerDone(args *NotifyDoneArgs, reply *IntReply) error {
 	// Check if Job was OK
 	if args.Status != 0 {
 		fmt.Println("Job Failed")
-		// TODO mark job failed
+		reply.Status = 1;
 	}
 
 	// TODO Store the temp files in master data
@@ -75,7 +75,6 @@ func (c *Coordinator) Done() bool {
 	ret := false
 	/* done_time - the period to wait between Done() */
 	time.Sleep(5 * time.Second)
-	fmt.Println("Jobs not done");
 
 	return ret
 }
@@ -115,8 +114,6 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 		
 	}
-
-
 
 
 	fmt.Println("Ready to assign map jobs.")
