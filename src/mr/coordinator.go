@@ -15,15 +15,14 @@ type Coordinator struct {
 
 type map_jobs struct {
 	next *map_jobs
-	job_id	int				// incremented from 1
-	length	int64			// total length of file
-	offset	int				// offset in file
-	name	string			// file name
-	status int 				// -1 = failed or unassigned, 0 = assigned, 1 = completed
-	file_location string	// not set until Job done
+	job_id	int
+	length	int64
+	offset	int
+	name	string
+	status int
+	file_location string
 }
 
-// global head variable of the map_jobs
 var head *map_jobs
 
 
@@ -34,28 +33,29 @@ var head *map_jobs
 func (c *Coordinator) GetMJob(arg *IntArg, reply *MapJobReply) error {
 
 	fmt.Println(" received MJOB request")
-	if c.jobs == (map_jobs{}) {
-		fmt.Println(" no more map jobs to give")
+	job := *head
+	for (job.next != nil && job.status != 0) {
+		fmt.Println("Job name %s", job.name)
+		job = *job.next
+	}
+	if job == (map_jobs{}) {
+		fmt.Println(" all jobs assigned")
 		return nil
 	}
-	reply.JobId = c.jobs.job_id
-	reply.Index = c.jobs.offset
-	reply.File = c.jobs.name
-	reply.Length = c.jobs.length
-	c.jobs = *c.jobs.next
+	reply.JobId = job.job_id
+	reply.Index = job.offset
+	reply.File = job.name
+	reply.Length = job.length
 	return nil
 }
 
 //
-// get the confirmation from the Worker that a job is done
+// get the mapped information from worker.
 //
 //
 func (c *Coordinator) WorkerDone(args *NotifyDoneArgs, reply *IntReply) error {
 
-
-	fmt.Printf("\nWorker is done %v", args.JobId)
-
-	// Iterate over the map_jobs to find matching job and store its location
+	// Find matching job and store location
 	jobs := head
 	if jobs.next != nil {
 		if (jobs.job_id == args.JobId) {
@@ -65,7 +65,8 @@ func (c *Coordinator) WorkerDone(args *NotifyDoneArgs, reply *IntReply) error {
 		}
 		jobs = jobs.next
 	}
-	// Notify worker we got its data, it can die
+
+	// Notify worker it can die
 	reply.Status = 0;
 	return nil
 
@@ -110,38 +111,39 @@ func (c *Coordinator) Done() bool {
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 
-	// Your code here.
-
-	// Lets start by printing the file names.
+	// Iterate over files
 	for i, s := range files {
 		fmt.Print("Index ",i," ", s)
 
-		// Now lets get the file size to split into 64KB chunks
 		f, err := os.Open(s)
 		if err != nil {
-  			// Could not obtain file, handle error
+			fmt.Printf("Could not obtain file\n")
 		}
 
 		fi, err := f.Stat()
 		if err != nil {
-  			// Could not obtain stat, handle error
+			fmt.Printf("Could not obtain stat\n")
 		}
-		fmt.Printf(" %d bytes \n", fi.Size())
-		// Store the map_jobs in the coordinator class
-		item := map_jobs{nil, i, fi.Size(), 0, s, -1, ""}
-		c.jobs.next = &item
-		if i == 0 {
-			head = &c.jobs
-		}
-		split_size := int64(10000)		
-		num_parts := item.length / split_size
-		fmt.Println(num_parts)
 
-		
+		// Add file to map_jobs
+		item := map_jobs{nil, i, fi.Size(), 0, s, -1, ""}
+		if i == 0 {
+			c.jobs = item
+			head = &c.jobs
+		} else {
+			c.jobs.next = &item
+			c.jobs = *c.jobs.next
+		}
+
+		// TODO: File segmentation
+		//split_size := int64(10000)
+		//num_parts := item.length / split_size
+		//fmt.Println(num_parts)
 	}
 
 
 	fmt.Println("Ready to assign map jobs.")
+
 	// Thread that listens for Jobs
 	c.server()
 

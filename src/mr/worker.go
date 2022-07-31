@@ -36,7 +36,7 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	status := 0
 
-	// Get the file name from the coordinator
+	// Get a job from Coordinator
 	job_id, filename := CallGetMJob()
 
 	content, err := ioutil.ReadFile(filename)
@@ -44,14 +44,14 @@ func Worker(mapf func(string, string) []KeyValue,
 		status = -1
 	}
 
-	// Pass the filename and context to the Map function
+	// Pass to Map function
 	keyvalue_array :=	mapf(filename, string(content))
 
-	// Encode the KeyValue struct into a Bytes array
+	// Encode the KV data
 	reqBodyBytes := new (bytes.Buffer)
 	json.NewEncoder(reqBodyBytes).Encode(keyvalue_array)
 
-	// Store intermediate data
+	// Store intermediate file
 	temp_filename := fmt.Sprintf("%s_temp", filename)
 	err = os.WriteFile(temp_filename, reqBodyBytes.Bytes(), 0644)
 	if err != nil {
@@ -66,16 +66,17 @@ func Worker(mapf func(string, string) []KeyValue,
 
 }
 
-// ask the coordinator for a map job
+// Ask the coordinator for a map job
 func CallGetMJob() (int, string) {
 	arg := IntArg{}
 	reply := MapJobReply{}
 	ok := call("Coordinator.GetMJob", &arg, &reply)
+
 	if ok {
-		// Print the returned input_data information
 		fmt.Printf("This worker is assigned\n "+
 		"JobId: %v File: %s, Filesize: %v, Index %v ",
 		reply.JobId, reply.File, reply.Length, reply.Index)
+
 		return reply.JobId, reply.File
 
 	} else {
