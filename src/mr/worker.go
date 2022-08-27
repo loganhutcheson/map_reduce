@@ -34,32 +34,30 @@ func ihash(key string) int {
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
-	status := 0
+	status := FINISHED
 
 	// Get a job from Coordinator
 	job_id, filename := CallGetMJob()
-
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
-		status = -1
+		status = UNASSIGNED
 	}
 
-	// Pass to Map function
-	keyvalue_array :=	mapf(filename, string(content))
+	// Call map
+	keyvalue_array := mapf(filename, string(content))
 
-	// Encode the KV data
+	// Encode and store map data
 	reqBodyBytes := new (bytes.Buffer)
 	json.NewEncoder(reqBodyBytes).Encode(keyvalue_array)
-
-	// Store intermediate file
 	temp_filename := fmt.Sprintf("%s_temp", filename)
 	err = os.WriteFile(temp_filename, reqBodyBytes.Bytes(), 0644)
 	if err != nil {
-		status = -1
+		status = UNASSIGNED
 	}
 
-	// Notify coordinator job is done
+	// Notify coordinator status
 	ok := CallNotifyDone(job_id, status)
+	fmt.Println("JobId: ", job_id, " Finished with status: ", status)
 	if ok != 0 {
 		log.Fatal(err)
 	}
@@ -73,9 +71,9 @@ func CallGetMJob() (int, string) {
 	ok := call("Coordinator.GetMJob", &arg, &reply)
 
 	if ok {
-		fmt.Printf("This worker is assigned\n "+
-		"JobId: %v File: %s, Filesize: %v, Index %v ",
-		reply.JobId, reply.File, reply.Length, reply.Index)
+		fmt.Printf("This worker is assigned:\n"+
+		"JobId: %v File: %s, Filesize: %v\n",
+		reply.JobId, reply.File, reply.Length)
 
 		return reply.JobId, reply.File
 

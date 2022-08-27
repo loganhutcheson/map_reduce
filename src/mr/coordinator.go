@@ -9,6 +9,14 @@ import "net/http"
 import "fmt"
 import "time"
 
+var debug = true
+
+const (
+	UNASSIGNED int  = -1
+	FINISHED 		= 0
+	ASSIGNED		= 1
+)
+
 type Coordinator struct {
 	jobs	map_jobs
 }
@@ -32,20 +40,21 @@ var head *map_jobs
 //
 func (c *Coordinator) GetMJob(arg *IntArg, reply *MapJobReply) error {
 
-	fmt.Println(" received MJOB request")
-	job := *head
-	for (job.next != nil && job.status != 0) {
-		fmt.Println("Job name %s", job.name)
-		job = *job.next
+	job := head
+	for (job != nil && job.status != UNASSIGNED) {
+		job = job.next
 	}
-	if job == (map_jobs{}) {
-		fmt.Println(" all jobs assigned")
+	if job == nil {
+		fmt.Println("No Jobs to Assign")
 		return nil
+	} else {
+		fmt.Println("Assigning Job")
+		reply.JobId = job.job_id
+		reply.Index = job.offset
+		reply.File = job.name
+		reply.Length = job.length
+		job.status = ASSIGNED
 	}
-	reply.JobId = job.job_id
-	reply.Index = job.offset
-	reply.File = job.name
-	reply.Length = job.length
 	return nil
 }
 
@@ -56,14 +65,14 @@ func (c *Coordinator) GetMJob(arg *IntArg, reply *MapJobReply) error {
 func (c *Coordinator) WorkerDone(args *NotifyDoneArgs, reply *IntReply) error {
 
 	// Find matching job and store location
-	jobs := head
-	if jobs.next != nil {
-		if (jobs.job_id == args.JobId) {
-			jobs.status = args.Status
-			jobs.file_location = args.Location
+	job := head
+	if job != nil {
+		if (job.job_id == args.JobId) {
+			job.status = args.Status
+			job.file_location = args.Location
 			return nil
 		}
-		jobs = jobs.next
+		job = job.next
 	}
 
 	// Notify worker it can die
@@ -93,13 +102,29 @@ func (c *Coordinator) server() {
 // if the entire job has finished.
 //
 func (c *Coordinator) Done() bool {
-	ret := false
+	ret := true
 	/* done_time - the period to wait between Done() */
 	time.Sleep(5 * time.Second)
 
 
-	// TODO - Iterate over the map_jobs list and check status of jobs
-
+	// Iterate over the map_jobs list and check status of jobs
+	jobs := head
+	total := 0
+	complete := 0
+	if jobs != nil {
+		total++
+		if (jobs.status == FINISHED) {
+			complete++
+		} else {
+			ret = false
+		}
+		jobs = jobs.next
+	}
+	if debug {
+		fmt.Printf("Master Stats: \n" +
+			"	Total Jobs: %d \n" +
+			"	Complete Jobs: %d\n", total, complete)
+	}
 	return ret
 }
 
@@ -113,7 +138,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	// Iterate over files
 	for i, s := range files {
-		fmt.Print("Index ",i," ", s)
+		fmt.Print("Reading file ",s, "\n")
 
 		f, err := os.Open(s)
 		if err != nil {
@@ -126,7 +151,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		}
 
 		// Add file to map_jobs
-		item := map_jobs{nil, i, fi.Size(), 0, s, -1, ""}
+		item := map_jobs{nil, i, fi.Size(), 0, s, UNASSIGNED, ""}
 		if i == 0 {
 			c.jobs = item
 			head = &c.jobs
@@ -142,7 +167,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	}
 
 
-	fmt.Println("Ready to assign map jobs.")
+	fmt.Println("Master is ready.\n")
 
 	// Thread that listens for Jobs
 	c.server()
