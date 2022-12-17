@@ -13,9 +13,6 @@ Run Worker:
 $ go run -race mrworker.go wc.so
 
 
-My blog post on the is topic:
-https://loganhutcheson.com/2022/09/22/map-reduce/
-
 
 Credit for the project goes to:
 MIT 6.824 Lab 1: Map Reduce
