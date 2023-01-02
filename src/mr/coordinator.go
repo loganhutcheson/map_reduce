@@ -6,8 +6,12 @@ import "os"
 import "net/rpc"
 import "net/http"
 
-import "fmt"
-import "time"
+import (
+	"fmt"
+	"time"
+	"sync"
+)
+
 
 var debug = true
 
@@ -19,6 +23,8 @@ const (
 
 type Coordinator struct {
 	jobs	map_jobs
+	head 	*map_jobs
+	mu		sync.Mutex
 }
 
 type map_jobs struct {
@@ -31,16 +37,16 @@ type map_jobs struct {
 	file_location string
 }
 
-var head *map_jobs
-
 
 //
+// GetMJob
 // assign a worker a map job.
 //
 //
 func (c *Coordinator) GetMJob(arg *IntArg, reply *MapJobReply) error {
-
-	job := head
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	job := c.head
 	for (job != nil && job.status != UNASSIGNED) {
 		job = job.next
 	}
@@ -59,13 +65,16 @@ func (c *Coordinator) GetMJob(arg *IntArg, reply *MapJobReply) error {
 }
 
 //
-// get the mapped information from worker.
+// WorkerDone
+// worker end condition
+// process the mapped information from worker.
 //
 //
 func (c *Coordinator) WorkerDone(args *NotifyDoneArgs, reply *IntReply) error {
-
 	// Find matching job and store location
-	job := head
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	job := c.head
 	if job != nil {
 		if (job.job_id == args.JobId) {
 			job.status = args.Status
@@ -108,7 +117,9 @@ func (c *Coordinator) Done() bool {
 
 
 	// Iterate over the map_jobs list and check status of jobs
-	jobs := head
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	jobs := c.head
 	total := 0
 	complete := 0
 	if jobs != nil {
@@ -154,7 +165,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		item := map_jobs{nil, i, fi.Size(), 0, s, UNASSIGNED, ""}
 		if i == 0 {
 			c.jobs = item
-			head = &c.jobs
+			c.head = &c.jobs
 		} else {
 			c.jobs.next = &item
 			c.jobs = *c.jobs.next
