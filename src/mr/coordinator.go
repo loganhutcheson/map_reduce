@@ -22,13 +22,13 @@ const (
 )
 
 type Coordinator struct {
-	jobs	map_jobs
-	head 	*map_jobs
+	job		map_job
+	head 	*map_job
 	mu		sync.Mutex
 }
 
-type map_jobs struct {
-	next *map_jobs
+type map_job struct {
+	next *map_job
 	job_id	int
 	length	int64
 	offset	int
@@ -54,7 +54,7 @@ func (c *Coordinator) GetMJob(arg *IntArg, reply *MapJobReply) error {
 		fmt.Println("No Jobs to Assign")
 		return nil
 	} else {
-		fmt.Println("Assigning Job")
+		fmt.Println("Assigning Job", job.name)
 		reply.JobId = job.job_id
 		reply.Index = job.offset
 		reply.File = job.name
@@ -75,7 +75,10 @@ func (c *Coordinator) WorkerDone(args *NotifyDoneArgs, reply *IntReply) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	job := c.head
-	if job != nil {
+	for {
+		if job == nil {
+			break
+		}
 		if (job.job_id == args.JobId) {
 			job.status = args.Status
 			job.file_location = args.Location
@@ -116,20 +119,27 @@ func (c *Coordinator) Done() bool {
 	time.Sleep(5 * time.Second)
 
 
-	// Iterate over the map_jobs list and check status of jobs
+	// Iterate over the map_job list and check status of job
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	jobs := c.head
+	job := c.head
 	total := 0
 	complete := 0
-	if jobs != nil {
+
+	for {
+
+		if job == nil {
+			break
+		}
+
 		total++
-		if (jobs.status == FINISHED) {
+		if (job.status == FINISHED) {
 			complete++
 		} else {
 			ret = false
 		}
-		jobs = jobs.next
+		job = job.next
+
 	}
 	if debug {
 		fmt.Printf("Master Stats: \n" +
@@ -146,6 +156,7 @@ func (c *Coordinator) Done() bool {
 //
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
+	var iterator *map_job
 
 	// Iterate over files
 	for i, s := range files {
@@ -161,14 +172,15 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 			fmt.Printf("Could not obtain stat\n")
 		}
 
-		// Add file to map_jobs
-		item := map_jobs{nil, i, fi.Size(), 0, s, UNASSIGNED, ""}
+		// Add file to map_job
+		item := map_job{nil, i, fi.Size(), 0, s, UNASSIGNED, ""}
 		if i == 0 {
-			c.jobs = item
-			c.head = &c.jobs
+			c.job = item
+			c.head = &c.job
+			iterator = c.head
 		} else {
-			c.jobs.next = &item
-			c.jobs = *c.jobs.next
+			iterator.next = &item
+			iterator = iterator.next
 		}
 
 		// TODO: File segmentation
