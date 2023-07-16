@@ -1,19 +1,21 @@
 # map_reduce
+Go implementation of Map Reduce<br>
 
-This repository is a go implementation of Google's map reduce system.
-Map reduce is a abstracted approach to carrying out distributed work loads over many computers.
+< === How to Run === ><br>
+$ cd src/main/
 
-Compile:
+--  Compile: (example with word count plugin)<br>
 $ go build -race -buildmode=plugin ../mrapps/wc.go
 
-Run Coordinator:
+-- Run Coordinator<br>
 $ go run -race mrcoordinator.go pg-*.txt
 
-Run Worker:
+-- Run Worker:<br>
 $ go run -race mrworker.go wc.so
 
 
-
-Credit for the project goes to:
-MIT 6.824 Lab 1: Map Reduce
+< === Credit === >
+<br>
+Credit for the project goes to:<br>
+MIT 6.824 Lab 1: Map Reduce<br>
 https://pdos.csail.mit.edu/6.824/labs/lab-mr.html
