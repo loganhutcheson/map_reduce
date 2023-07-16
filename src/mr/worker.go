@@ -36,28 +36,43 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	status := FINISHED
 
-	// Get a job from Coordinator
-	job_id, filename := CallGetMJob()
-	content, err := ioutil.ReadFile(filename)
-	if err != nil {
-		status = UNASSIGNED
+	// Try to get job from Coordinator
+	reply := JobReply{}
+	CallGetJob(&reply)
+
+	if reply.JobId == -1 {
+		fmt.Println("No jobs Assigned")
+		status = UNASSIGNED;
+		return
 	}
 
-	// Call map
-	keyvalue_array := mapf(filename, string(content))
-
-	// Encode and store map data
-	reqBodyBytes := new (bytes.Buffer)
-	json.NewEncoder(reqBodyBytes).Encode(keyvalue_array)
-	temp_filename := fmt.Sprintf("%s_temp", filename)
-	err = os.WriteFile(temp_filename, reqBodyBytes.Bytes(), 0644)
+	content, err := ioutil.ReadFile(reply.File)
+	fmt.Println(reply.File)
 	if err != nil {
+		fmt.Println("Unable to open file: ", reply.File)
 		status = UNASSIGNED
+		return
+	}
+
+	
+	// Map Job Retreived - Enter Map Routine
+	if reply.JobType == MAP_TYPE {
+
+		keyvalue_array := mapf(reply.File, string(content))
+
+		// Encode and store map data
+		reqBodyBytes := new (bytes.Buffer)
+		json.NewEncoder(reqBodyBytes).Encode(keyvalue_array)
+		temp_filename := fmt.Sprintf("%s_temp", reply.File)
+		err = os.WriteFile(temp_filename, reqBodyBytes.Bytes(), 0644)
+		if err != nil {
+			status = UNASSIGNED
+		}
 	}
 
 	// Notify coordinator status
-	ok := CallNotifyDone(job_id, status)
-	fmt.Println("JobId: ", job_id, " Finished with status: ", status)
+	ok := CallNotifyDone(reply.JobId, status)
+	fmt.Println("JobId: ", reply.JobId, " Finished with status: ", status)
 	if ok != 0 {
 		log.Fatal(err)
 	}
@@ -65,23 +80,17 @@ func Worker(mapf func(string, string) []KeyValue,
 }
 
 // Ask the coordinator for a map job
-func CallGetMJob() (int, string) {
+func CallGetJob(reply *JobReply)  {
 	arg := IntArg{}
-	reply := MapJobReply{}
-	ok := call("Coordinator.GetMJob", &arg, &reply)
+	ok := call("Coordinator.GetJob", &arg, &reply)
 
 	if ok {
-		fmt.Printf("This worker is assigned:\n"+
+		fmt.Printf("Assigned:\n"+
 		"JobId: %v File: %s, Filesize: %v\n",
 		reply.JobId, reply.File, reply.Length)
-
-		return reply.JobId, reply.File
-
 	} else {
-		fmt.Println("Worker MJOB call not OK")
-		fmt.Printf("call failed!\n")
+		fmt.Println("Job request call failed!\n")
 	}
-	return -1, ""
 }
 
 // notify the coordinator that the job is done

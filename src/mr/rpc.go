@@ -9,6 +9,17 @@ package mr
 import "os"
 import "strconv"
 
+const (
+    UNASSIGNED int  = -1
+    FINISHED        = 0
+    ASSIGNED        = 1
+)
+
+const (
+    MAP_TYPE int = 0
+    REDUCE_TYPE = 1
+)
+
 // A simple Integer argument
 type IntArg struct {
 	Status int
@@ -21,8 +32,9 @@ type IntReply struct {
 
 // The Coordinate replies with Map Job request
 // and gives details on the job to perform.
-type MapJobReply struct {
+type JobReply struct {
 	JobId int
+	JobType int
 	File string
 	Index int
 	Length int64
