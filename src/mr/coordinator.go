@@ -16,28 +16,27 @@ import (
 var debug = true
 
 type Coordinator struct {
-	job		map_job
-	head 	*map_job
+	job		mr_job
+	head 	*mr_job
 	mu		sync.Mutex
 }
 
-type map_job struct {
-	next *map_job
-	job_id	int
-	length	int64
-	offset	int
-	name	string
+type mr_job struct {
+	next *mr_job
+	job_id  int
+	job_type int
 	status int
 	file_location string
+	file_index int64
+	m_size int64
 }
-
 
 //
 // GetJob Routine
 // assigns a map or reduce job to worker
 //
 //
-func (c *Coordinator) GetJob(arg *IntArg, reply *JobReply) error {
+func (c *Coordinator) GetJob(proc_id *IntArg, reply *JobReply) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	job := c.head
@@ -49,13 +48,13 @@ func (c *Coordinator) GetJob(arg *IntArg, reply *JobReply) error {
 		reply.JobId = -1
 		return nil
 	} else {
-		fmt.Println("Assigning Job", job.name)
 		reply.JobId = job.job_id
-		reply.Index = job.offset
-		reply.File = job.name
-		reply.Length = job.length
+		reply.FileLocation = job.file_location
+		reply.FileOffset = job.file_index
+		reply.DataLength = job.m_size
 		job.status = ASSIGNED
 	}
+
 	return nil
 }
 
@@ -114,7 +113,7 @@ func (c *Coordinator) Done() bool {
 	time.Sleep(5 * time.Second)
 
 
-	// Iterate over the map_job list and check status of job
+	// Iterate over the mr_job list and check status of job
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	job := c.head
@@ -150,38 +149,57 @@ func (c *Coordinator) Done() bool {
 // nReduce is the number of reduce tasks to use.
 //
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
+
 	c := Coordinator{}
-	var iterator *map_job
 
-	// Iterate over files
-	for i, s := range files {
-		fmt.Print("Reading file ",s, "\n")
+	var iterator *mr_job
 
-		f, err := os.Open(s)
+	/* Defaults */
+	m_size := int64(64 * 1024 * 1024) // 64MB
+//	m_counter := 1
+	job_id := 1000
+
+
+	// Split input data into "M" pieces of m_size
+	for _, file := range files {
+		f, err := os.Open(file)
 		if err != nil {
-			fmt.Printf("Could not obtain file\n")
+			fmt.Printf("Cannot access file: %s, error: %v\n", file, err)
+			return &c
 		}
+		defer f.Close()
 
 		fi, err := f.Stat()
 		if err != nil {
-			fmt.Printf("Could not obtain stat\n")
+			fmt.Printf("Cannot access file: %s, error: %v\n", file, err)
+            return &c
 		}
 
-		// Add file to map_job
-		item := map_job{nil, i, fi.Size(), 0, s, UNASSIGNED, ""}
-		if i == 0 {
-			c.job = item
-			c.head = &c.job
-			iterator = c.head
-		} else {
-			iterator.next = &item
-			iterator = iterator.next
-		}
+		fileSize := fi.Size()		
+		var offset int64 = 0
+		var chunkSize int64 = m_size
+		// Loop through the file in 64KB increments
+		for offset < fileSize {
 
-		// TODO: File segmentation
-		//split_size := int64(10000)
-		//num_parts := item.length / split_size
-		//fmt.Println(num_parts)
+			if fileSize-offset < chunkSize {
+				chunkSize = fileSize - offset
+			}
+
+			// add map job to linked list
+			item := mr_job{nil, job_id, MAP_TASK, UNASSIGNED,
+						file, offset, m_size}
+			if c.job.job_id == 0 {
+				c.job = item
+				c.head = &c.job
+				iterator = c.head
+			} else {
+				iterator.next = &item
+				iterator = iterator.next
+			}
+
+            offset += chunkSize
+            job_id = job_id + 1
+		}
 	}
 
 

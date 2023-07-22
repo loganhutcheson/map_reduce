@@ -4,7 +4,7 @@ import "fmt"
 import "log"
 import "net/rpc"
 import "hash/fnv"
-import "io/ioutil"
+import "io"
 import "os"
 import "encoding/json"
 import "bytes"
@@ -46,24 +46,40 @@ func Worker(mapf func(string, string) []KeyValue,
 		return
 	}
 
-	content, err := ioutil.ReadFile(reply.File)
-	fmt.Println(reply.File)
+	// Open the file
+	file, err := os.Open(reply.FileLocation)
 	if err != nil {
-		fmt.Println("Unable to open file: ", reply.File)
-		status = UNASSIGNED
+		fmt.Println("Unable to open file:", err)
 		return
 	}
-
+	defer file.Close()
 	
 	// Map Job Retreived - Enter Map Routine
-	if reply.JobType == MAP_TYPE {
+	if reply.JobType == MAP_TASK {
 
-		keyvalue_array := mapf(reply.File, string(content))
+		// Move to the desired offset
+		_, err = file.Seek(reply.FileOffset, io.SeekStart)
+		if err != nil {
+			fmt.Println("Error seeking to the offset:", err)
+			return
+		}
+		
+		// Read the data from the offset
+		buffer := make([]byte, reply.DataLength)
+		_, err := file.Read(buffer)
+		if err != nil && err != io.EOF {
+			fmt.Println("Error reading data from file:", err)
+			return
+		}
+
+		// Map
+		keyvalue_array := mapf("", string(buffer))
 
 		// Encode and store map data
 		reqBodyBytes := new (bytes.Buffer)
 		json.NewEncoder(reqBodyBytes).Encode(keyvalue_array)
-		temp_filename := fmt.Sprintf("%s_temp", reply.File)
+		temp_filename := fmt.Sprintf("%s_temp_%d", reply.FileLocation,
+				reply.FileOffset / (1024 * 64))
 		err = os.WriteFile(temp_filename, reqBodyBytes.Bytes(), 0644)
 		if err != nil {
 			status = UNASSIGNED
@@ -81,13 +97,13 @@ func Worker(mapf func(string, string) []KeyValue,
 
 // Ask the coordinator for a map job
 func CallGetJob(reply *JobReply)  {
-	arg := IntArg{}
+	arg := IntArg{ os.Getpid() }
 	ok := call("Coordinator.GetJob", &arg, &reply)
 
 	if ok {
 		fmt.Printf("Assigned:\n"+
 		"JobId: %v File: %s, Filesize: %v\n",
-		reply.JobId, reply.File, reply.Length)
+		reply.JobId, reply.FileLocation, reply.FileOffset)
 	} else {
 		fmt.Println("Job request call failed!\n")
 	}

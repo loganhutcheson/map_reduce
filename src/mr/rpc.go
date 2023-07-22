@@ -8,6 +8,9 @@ package mr
 
 import "os"
 import "strconv"
+import "fmt"
+import "runtime"
+
 
 const (
     UNASSIGNED int  = -1
@@ -16,8 +19,8 @@ const (
 )
 
 const (
-    MAP_TYPE int = 0
-    REDUCE_TYPE = 1
+    MAP_TASK int = 0
+    REDUCE_TASK = 1
 )
 
 // A simple Integer argument
@@ -35,9 +38,9 @@ type IntReply struct {
 type JobReply struct {
 	JobId int
 	JobType int
-	File string
-	Index int
-	Length int64
+	FileLocation string
+	FileOffset int64
+	DataLength int64
 }
 
 // The worker must notify the Coordinator
@@ -58,4 +61,10 @@ func coordinatorSock() string {
 	s := "/var/tmp/824-mr-"
 	s += strconv.Itoa(os.Getuid())
 	return s
+}
+
+// Logger function takes the function name and prints it.
+func Logger() {
+    pc, _, _, _ := runtime.Caller(1)
+    fmt.Printf("Function called: %s\n", runtime.FuncForPC(pc).Name())
 }
