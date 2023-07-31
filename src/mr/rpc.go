@@ -41,6 +41,7 @@ type JobReply struct {
 	FileLocation string
 	FileOffset int64
 	DataLength int64
+	NReduce int
 }
 
 // The worker must notify the Coordinator

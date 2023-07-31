@@ -8,6 +8,7 @@ import "io"
 import "os"
 import "encoding/json"
 import "bytes"
+//import "sort"
 
 //
 // Map functions return a slice of KeyValue.
@@ -16,6 +17,18 @@ type KeyValue struct {
 	Key   string
 	Value string
 }
+
+// for sorting by key.
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
+
+// Define a data structure to store key-value pairs for each bucket
+type BucketMap map[int][]KeyValue
+
 
 //
 // use ihash(key) % NReduce to choose the reduce
@@ -74,16 +87,38 @@ func Worker(mapf func(string, string) []KeyValue,
 
 		// Map
 		keyvalue_array := mapf("", string(buffer))
+		bucketMap := make(BucketMap, reply.NReduce)
 
-		// Encode and store map data
-		reqBodyBytes := new (bytes.Buffer)
-		json.NewEncoder(reqBodyBytes).Encode(keyvalue_array)
-		temp_filename := fmt.Sprintf("%s_temp_%d", reply.FileLocation,
-				reply.FileOffset / (1024 * 64))
-		err = os.WriteFile(temp_filename, reqBodyBytes.Bytes(), 0644)
-		if err != nil {
-			status = UNASSIGNED
+		for _, kv := range keyvalue_array {
+			rtask := ihash(kv.Key) % reply.NReduce
+			fmt.Printf("%d\n", rtask)
+			// Append the key-value pair to the corresponding bucket in the BucketMap
+			bucketMap[rtask] = append(bucketMap[rtask], kv)
 		}
+
+		for i := 0; i < reply.NReduce; i++ {
+			// Encode and store map data
+			reqBodyBytes := new (bytes.Buffer)
+			json.NewEncoder(reqBodyBytes).Encode(bucketMap[i])
+			temp_filename := fmt.Sprintf("%s_temp_%d_%d", reply.FileLocation, i, reply.JobId)
+			err = os.WriteFile(temp_filename, reqBodyBytes.Bytes(), 0644)
+			if err != nil {
+				status = UNASSIGNED
+			}
+		}
+	}
+
+	// Reduce Job Retreived - Enter Reduce Routine
+    if reply.JobType == REDUCE_TASK {
+
+		// TODO Read M files for this R
+		// open file temp_R_(*M)_out.txt into buff
+
+		// TODO sort
+		//sort.Sort(ByKey(keyvalue_array))
+
+		// TODO append values for each KEY for this R and call map
+
 	}
 
 	// Notify coordinator status

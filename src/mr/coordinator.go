@@ -19,6 +19,7 @@ type Coordinator struct {
 	job		mr_job
 	head 	*mr_job
 	mu		sync.Mutex
+	numReduce int
 }
 
 type mr_job struct {
@@ -52,6 +53,7 @@ func (c *Coordinator) GetJob(proc_id *IntArg, reply *JobReply) error {
 		reply.FileLocation = job.file_location
 		reply.FileOffset = job.file_index
 		reply.DataLength = job.m_size
+		reply.NReduce = c.numReduce
 		job.status = ASSIGNED
 	}
 
@@ -151,6 +153,7 @@ func (c *Coordinator) Done() bool {
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	c := Coordinator{}
+	c.numReduce = nReduce
 
 	var iterator *mr_job
 
