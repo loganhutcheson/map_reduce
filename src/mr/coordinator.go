@@ -142,6 +142,7 @@ func (c *Coordinator) Done() bool {
 			"	Total Jobs: %d \n" +
 			"	Complete Jobs: %d\n", total, complete)
 	}
+
 	return ret
 }
 
@@ -161,7 +162,6 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	m_size := int64(64 * 1024 * 1024) // 64MB
 //	m_counter := 1
 	job_id := 1000
-
 
 	// Split input data into "M" pieces of m_size
 	for _, file := range files {
@@ -213,8 +213,11 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	// Done calls periodically
 	for {
-		c.Done()
+		if c.Done() {
+			break
+		}
 	}
+	fmt.Println("Map jobs are complete. \n")
 
 	return &c
 }

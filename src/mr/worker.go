@@ -91,7 +91,6 @@ func Worker(mapf func(string, string) []KeyValue,
 
 		for _, kv := range keyvalue_array {
 			rtask := ihash(kv.Key) % reply.NReduce
-			fmt.Printf("%d\n", rtask)
 			// Append the key-value pair to the corresponding bucket in the BucketMap
 			bucketMap[rtask] = append(bucketMap[rtask], kv)
 		}
