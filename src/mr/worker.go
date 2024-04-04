@@ -1,18 +1,20 @@
 package mr
 
-import "fmt"
-import "log"
-import "net/rpc"
-import "hash/fnv"
-import "io"
-import "os"
-import "encoding/json"
-import "bytes"
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"hash/fnv"
+	"io"
+	"log"
+	"net/rpc"
+	"os"
+	"time"
+)
+
 //import "sort"
 
-//
 // Map functions return a slice of KeyValue.
-//
 type KeyValue struct {
 	Key   string
 	Value string
@@ -29,34 +31,32 @@ func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 // Define a data structure to store key-value pairs for each bucket
 type BucketMap map[int][]KeyValue
 
-
-//
 // use ihash(key) % NReduce to choose the reduce
 // task number for each KeyValue emitted by Map.
-//
 func ihash(key string) int {
 	h := fnv.New32a()
 	h.Write([]byte(key))
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-
-//
 // main/mrworker.go calls this function.
-//
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
-
-	status := FINISHED
-
-	// Try to get job from Coordinator
+	status := UNASSIGNED
+	// Get job from Coordinator
 	reply := JobReply{}
-	CallGetJob(&reply)
-
-	if reply.JobId == -1 {
-		fmt.Println("No jobs Assigned")
-		status = UNASSIGNED;
-		return
+	startTime := time.Now()
+	for {
+		CallGetJob(&reply)
+		if reply.JobId != -1 {
+			break
+		}
+		elapsedTime := time.Since(startTime)
+		if elapsedTime >= 60*time.Second {
+			fmt.Println("Worker timeout...")
+			break
+		}
+		time.Sleep(1 * time.Second)
 	}
 
 	// Open the file
@@ -66,7 +66,7 @@ func Worker(mapf func(string, string) []KeyValue,
 		return
 	}
 	defer file.Close()
-	
+
 	// Map Job Retreived - Enter Map Routine
 	if reply.JobType == MAP_TASK {
 
@@ -76,7 +76,7 @@ func Worker(mapf func(string, string) []KeyValue,
 			fmt.Println("Error seeking to the offset:", err)
 			return
 		}
-		
+
 		// Read the data from the offset
 		buffer := make([]byte, reply.DataLength)
 		_, err := file.Read(buffer)
@@ -85,7 +85,7 @@ func Worker(mapf func(string, string) []KeyValue,
 			return
 		}
 
-		// Map
+		// Map function
 		keyvalue_array := mapf("", string(buffer))
 		bucketMap := make(BucketMap, reply.NReduce)
 
@@ -97,7 +97,7 @@ func Worker(mapf func(string, string) []KeyValue,
 
 		for i := 0; i < reply.NReduce; i++ {
 			// Encode and store map data
-			reqBodyBytes := new (bytes.Buffer)
+			reqBodyBytes := new(bytes.Buffer)
 			json.NewEncoder(reqBodyBytes).Encode(bucketMap[i])
 			temp_filename := fmt.Sprintf("%s_temp_%d_%d", reply.FileLocation, i, reply.JobId)
 			err = os.WriteFile(temp_filename, reqBodyBytes.Bytes(), 0644)
@@ -108,8 +108,8 @@ func Worker(mapf func(string, string) []KeyValue,
 	}
 
 	// Reduce Job Retreived - Enter Reduce Routine
-    if reply.JobType == REDUCE_TASK {
-
+	if reply.JobType == REDUCE_TASK {
+		fmt.Println("Worker received a reduce task!")
 		// TODO Read M files for this R
 		// open file temp_R_(*M)_out.txt into buff
 
@@ -130,16 +130,16 @@ func Worker(mapf func(string, string) []KeyValue,
 }
 
 // Ask the coordinator for a map job
-func CallGetJob(reply *JobReply)  {
-	arg := IntArg{ os.Getpid() }
-	ok := call("Coordinator.GetJob", &arg, &reply)
+func CallGetJob(reply *JobReply) {
+	arg := IntArg{os.Getpid()}
+	ok := call("Coordinator.AssignJob", &arg, &reply)
 
 	if ok {
 		fmt.Printf("Assigned:\n"+
-		"JobId: %v File: %s, Filesize: %v\n",
-		reply.JobId, reply.FileLocation, reply.FileOffset)
+			"JobId: %v File: %s, Filesize: %v\n",
+			reply.JobId, reply.FileLocation, reply.FileOffset)
 	} else {
-		fmt.Println("Job request call failed!\n")
+		fmt.Println("Job request call failed!")
 	}
 }
 
@@ -155,18 +155,14 @@ func CallNotifyDone(job_id int, status int) int {
 	if ok {
 		return reply.Status
 	} else {
-		fmt.Printf("call failed!\n")
+		fmt.Println("call failed!")
 	}
 	return -1
 }
 
-
-
-//
 // send an RPC request to the coordinator, wait for the response.
 // usually returns true.
 // returns false if something goes wrong.
-//
 func call(rpcname string, args interface{}, reply interface{}) bool {
 	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
 	sockname := coordinatorSock()

@@ -1,47 +1,42 @@
 package mr
 
-import "log"
-import "net"
-import "os"
-import "net/rpc"
-import "net/http"
-
 import (
 	"fmt"
-	"time"
+	"log"
+	"net"
+	"net/http"
+	"net/rpc"
+	"os"
 	"sync"
+	"time"
 )
-
 
 var debug = true
 
 type Coordinator struct {
-	job		mr_job
-	head 	*mr_job
-	mu		sync.Mutex
+	job       mr_job
+	head      *mr_job
+	mu        sync.Mutex
 	numReduce int
 }
 
 type mr_job struct {
-	next *mr_job
-	job_id  int
-	job_type int
-	status int
+	next          *mr_job
+	job_id        int
+	job_type      int
+	status        int
 	file_location string
-	file_index int64
-	m_size int64
+	file_index    int64
+	m_size        int64
 }
 
-//
-// GetJob Routine
+// AssignJob Routine
 // assigns a map or reduce job to worker
-//
-//
-func (c *Coordinator) GetJob(proc_id *IntArg, reply *JobReply) error {
+func (c *Coordinator) AssignJob(proc_id *IntArg, reply *JobReply) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	job := c.head
-	for (job != nil && job.status != UNASSIGNED) {
+	for job != nil && job.status != UNASSIGNED {
 		job = job.next
 	}
 	if job == nil {
@@ -60,12 +55,8 @@ func (c *Coordinator) GetJob(proc_id *IntArg, reply *JobReply) error {
 	return nil
 }
 
-//
-// WorkerDone
-// worker end condition
-// process the mapped information from worker.
-//
-//
+// WorkerDone - end condition
+// Processes the reply from worker
 func (c *Coordinator) WorkerDone(args *NotifyDoneArgs, reply *IntReply) error {
 	// Find matching job and store location
 	c.mu.Lock()
@@ -75,7 +66,7 @@ func (c *Coordinator) WorkerDone(args *NotifyDoneArgs, reply *IntReply) error {
 		if job == nil {
 			break
 		}
-		if (job.job_id == args.JobId) {
+		if job.job_id == args.JobId {
 			job.status = args.Status
 			job.file_location = args.Location
 			return nil
@@ -84,14 +75,12 @@ func (c *Coordinator) WorkerDone(args *NotifyDoneArgs, reply *IntReply) error {
 	}
 
 	// Notify worker it can die
-	reply.Status = 0;
+	reply.Status = 0
 	return nil
 
 }
 
-//
-// start a thread that listens for RPCs from worker.go
-//
+// Start a thread that listens for RPCs from worker.go
 func (c *Coordinator) server() {
 	rpc.Register(c)
 	rpc.HandleHTTP()
@@ -105,15 +94,12 @@ func (c *Coordinator) server() {
 	go http.Serve(l, nil)
 }
 
-//
 // main/mrcoordiator.go calls Done() periodically to find out
 // if the entire job has finished.
-//
 func (c *Coordinator) Done() bool {
 	ret := true
 	/* done_time - the period to wait between Done() */
 	time.Sleep(5 * time.Second)
-
 
 	// Iterate over the mr_job list and check status of job
 	c.mu.Lock()
@@ -123,13 +109,11 @@ func (c *Coordinator) Done() bool {
 	complete := 0
 
 	for {
-
-		if job == nil {
+		if job == nil
 			break
-		}
 
 		total++
-		if (job.status == FINISHED) {
+		if job.status == FINISHED {
 			complete++
 		} else {
 			ret = false
@@ -137,20 +121,16 @@ func (c *Coordinator) Done() bool {
 		job = job.next
 
 	}
-	if debug {
-		fmt.Printf("Master Stats: \n" +
-			"	Total Jobs: %d \n" +
-			"	Complete Jobs: %d\n", total, complete)
-	}
+	fmt.Printf("Master Stats: \n"+
+		"  Total Jobs: %d \n"+
+		"  Complete Jobs: %d\n", total, complete)
 
 	return ret
 }
 
-//
 // create a Coordinator.
 // main/mrcoordinator.go calls this function.
 // nReduce is the number of reduce tasks to use.
-//
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	c := Coordinator{}
@@ -158,9 +138,8 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	var iterator *mr_job
 
-	/* Defaults */
+	// Default values
 	m_size := int64(64 * 1024 * 1024) // 64MB
-//	m_counter := 1
 	job_id := 1000
 
 	// Split input data into "M" pieces of m_size
@@ -175,13 +154,13 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		fi, err := f.Stat()
 		if err != nil {
 			fmt.Printf("Cannot access file: %s, error: %v\n", file, err)
-            return &c
+			return &c
 		}
 
-		fileSize := fi.Size()		
+		fileSize := fi.Size()
 		var offset int64 = 0
 		var chunkSize int64 = m_size
-		// Loop through the file in 64KB increments
+		// Loop through the file in m_size segments
 		for offset < fileSize {
 
 			if fileSize-offset < chunkSize {
@@ -189,24 +168,22 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 			}
 
 			// add map job to linked list
-			item := mr_job{nil, job_id, MAP_TASK, UNASSIGNED,
-						file, offset, m_size}
+			map_job := mr_job{nil, job_id, MAP_TASK, UNASSIGNED,
+				file, offset, m_size}
 			if c.job.job_id == 0 {
-				c.job = item
+				c.job = map_job
 				c.head = &c.job
 				iterator = c.head
 			} else {
-				iterator.next = &item
+				iterator.next = &map_job
 				iterator = iterator.next
 			}
 
-            offset += chunkSize
-            job_id = job_id + 1
+			offset += chunkSize
+			job_id = job_id + 1
 		}
 	}
-
-
-	fmt.Println("Master is ready.\n")
+	fmt.Println("Coordinator is ready to assign Map jobs.")
 
 	// Thread that listens for Jobs
 	c.server()
@@ -217,7 +194,22 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 			break
 		}
 	}
-	fmt.Println("Map jobs are complete. \n")
+	fmt.Println("Map jobs are complete. Creating reduce jobs...")
+
+	// Create the reduce jobs
+	for i := 0; i < nReduce; i++ {
+		reduce_job := mr_job{nil, job_id, REDUCE_TASK, UNASSIGNED,
+			"", 0, 0}
+		// Add reduce job to linked list
+		if c.job.job_id == 0 {
+			c.job = reduce_job
+			c.head = &c.job
+			iterator = c.head
+		} else {
+			iterator.next = &reduce_job
+			iterator = iterator.next
+		}
+	}
 
 	return &c
 }

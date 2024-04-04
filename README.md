@@ -5,13 +5,13 @@ Go implementation of Map Reduce<br>
 $ cd src/main/
 
 --  Compile: (example with word count plugin)<br>
-$ go build -race -buildmode=plugin ../mrapps/wc.go
+$ go build -buildmode=plugin ../mrapps/wc.go
 
 -- Run Coordinator<br>
-$ go run -race mrcoordinator.go pg-*.txt
+$ go run mrcoordinator.go pg-*.txt
 
 -- Run Worker:<br>
-$ go run -race mrworker.go wc.so
+$ go run mrworker.go wc.so
 
 
 < === Credit === >
