@@ -5,6 +5,7 @@ fi
 
 echo "Cleaning workspace..."
 rm *temp* 2>/dev/null
+rm *final* 2>/dev/null
 echo "Compiling..."
 go build -buildmode=plugin ../mrapps/wc.go
 echo "Starting coordinator..."

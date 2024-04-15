@@ -14,14 +14,14 @@ import (
 )
 
 const (
-	UNASSIGNED int = -1
-	FINISHED       = 0
-	ASSIGNED       = 1
+	UNASSIGNED = -1
+	FINISHED   = 0
+	ASSIGNED   = 1
 )
 
 const (
-	MAP_TASK    int = 0
-	REDUCE_TASK     = 1
+	MAP_TASK    = 0
+	REDUCE_TASK = 1
 )
 
 // A simple Integer argument

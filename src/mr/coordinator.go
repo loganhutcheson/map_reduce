@@ -11,17 +11,20 @@ import (
 	"time"
 )
 
-var debug = true
+//var debug = true
 
 type Coordinator struct {
-	job       mr_job
-	head      *mr_job
+	mJob      map_job
+	mHead     *map_job
+	rJob      reduce_job
+	rHead     *reduce_job
 	mu        sync.Mutex
 	numReduce int
+	mapDone   int
 }
 
-type mr_job struct {
-	next          *mr_job
+type map_job struct {
+	next          *map_job
 	job_id        int
 	job_type      int
 	status        int
@@ -30,26 +33,51 @@ type mr_job struct {
 	m_size        int64
 }
 
+type reduce_job struct {
+	next   *reduce_job
+	job_id int
+	status int
+	rNum   int
+}
+
 // AssignJob Routine
 // assigns a map or reduce job to worker
 func (c *Coordinator) AssignJob(proc_id *IntArg, reply *JobReply) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	job := c.head
-	for job != nil && job.status != UNASSIGNED {
-		job = job.next
-	}
-	if job == nil {
-		fmt.Println("No Jobs to Assign")
-		reply.JobId = -1
-		return nil
+	if c.mapDone == 0 {
+		job := c.mHead
+		for job != nil && job.status != UNASSIGNED {
+			job = job.next
+		}
+		if job == nil {
+			fmt.Println("No Jobs to Assign")
+			reply.JobId = -1
+			return nil
+		} else {
+			reply.JobId = job.job_id
+			reply.FileLocation = job.file_location
+			reply.FileOffset = job.file_index
+			reply.DataLength = job.m_size
+			reply.NReduce = c.numReduce
+			job.status = ASSIGNED
+			reply.JobType = MAP_TASK
+		}
 	} else {
-		reply.JobId = job.job_id
-		reply.FileLocation = job.file_location
-		reply.FileOffset = job.file_index
-		reply.DataLength = job.m_size
-		reply.NReduce = c.numReduce
-		job.status = ASSIGNED
+		job := c.rHead
+		for job != nil && job.status != UNASSIGNED {
+			job = job.next
+		}
+		if job == nil {
+			fmt.Println("No Jobs to Assign")
+			reply.JobId = -1
+			return nil
+		} else {
+			reply.JobId = job.job_id
+			reply.NReduce = job.rNum
+			job.status = ASSIGNED
+			reply.JobType = REDUCE_TASK
+		}
 	}
 
 	return nil
@@ -61,17 +89,31 @@ func (c *Coordinator) WorkerDone(args *NotifyDoneArgs, reply *IntReply) error {
 	// Find matching job and store location
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	job := c.head
-	for {
-		if job == nil {
-			break
+	if c.mapDone == 0 {
+		job := c.mHead
+		for {
+			if job == nil {
+				break
+			}
+			if job.job_id == args.JobId {
+				job.status = args.Status
+				job.file_location = args.Location
+				return nil
+			}
+			job = job.next
 		}
-		if job.job_id == args.JobId {
-			job.status = args.Status
-			job.file_location = args.Location
-			return nil
+	} else {
+		job := c.rHead
+		for {
+			if job == nil {
+				break
+			}
+			if job.rNum == args.JobId {
+				job.status = args.Status
+				return nil
+			}
+			job = job.next
 		}
-		job = job.next
 	}
 
 	// Notify worker it can die
@@ -104,26 +146,53 @@ func (c *Coordinator) Done() bool {
 	// Iterate over the mr_job list and check status of job
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	job := c.head
-	total := 0
-	complete := 0
+	if c.mapDone == 0 {
+		job := c.mHead
+		total := 0
+		complete := 0
 
-	for {
-		if job == nil
-			break
+		for {
+			if job == nil {
+				break
+			}
+			total++
+			if job.status == FINISHED {
+				complete++
+			} else {
+				ret = false
+			}
+			job = job.next
 
-		total++
-		if job.status == FINISHED {
-			complete++
-		} else {
-			ret = false
 		}
-		job = job.next
+
+		fmt.Printf("Master Stats: \n"+
+			"  Total M Jobs: %d \n"+
+			"  Complete M Jobs: %d\n", total, complete)
+
+	} else {
+		job := c.rHead
+		total := 0
+		complete := 0
+
+		for {
+			if job == nil {
+				break
+			}
+			total++
+			if job.status == FINISHED {
+				complete++
+			} else {
+				ret = false
+			}
+			job = job.next
+
+		}
+
+		fmt.Printf("Master Stats: \n"+
+			"  Total R Jobs: %d \n"+
+			"  Complete R Jobs: %d\n", total, complete)
 
 	}
-	fmt.Printf("Master Stats: \n"+
-		"  Total Jobs: %d \n"+
-		"  Complete Jobs: %d\n", total, complete)
 
 	return ret
 }
@@ -136,7 +205,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 	c.numReduce = nReduce
 
-	var iterator *mr_job
+	var map_list *map_job
 
 	// Default values
 	m_size := int64(64 * 1024 * 1024) // 64MB
@@ -168,15 +237,15 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 			}
 
 			// add map job to linked list
-			map_job := mr_job{nil, job_id, MAP_TASK, UNASSIGNED,
+			map_job := map_job{nil, job_id, MAP_TASK, UNASSIGNED,
 				file, offset, m_size}
-			if c.job.job_id == 0 {
-				c.job = map_job
-				c.head = &c.job
-				iterator = c.head
+			if c.mJob.job_id == 0 {
+				c.mJob = map_job
+				c.mHead = &c.mJob
+				map_list = c.mHead
 			} else {
-				iterator.next = &map_job
-				iterator = iterator.next
+				map_list.next = &map_job
+				map_list = map_list.next
 			}
 
 			offset += chunkSize
@@ -195,19 +264,26 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		}
 	}
 	fmt.Println("Map jobs are complete. Creating reduce jobs...")
+	c.mapDone = 1
 
 	// Create the reduce jobs
+	var reduce_list *reduce_job
 	for i := 0; i < nReduce; i++ {
-		reduce_job := mr_job{nil, job_id, REDUCE_TASK, UNASSIGNED,
-			"", 0, 0}
+		reduce_job := reduce_job{nil, job_id, UNASSIGNED, i}
 		// Add reduce job to linked list
-		if c.job.job_id == 0 {
-			c.job = reduce_job
-			c.head = &c.job
-			iterator = c.head
+		if c.rJob.job_id == 0 {
+			c.rJob = reduce_job
+			c.rHead = &c.rJob
+			reduce_list = c.rHead
 		} else {
-			iterator.next = &reduce_job
-			iterator = iterator.next
+			reduce_list.next = &reduce_job
+			reduce_list = reduce_list.next
+		}
+	}
+	// Done calls periodically
+	for {
+		if c.Done() {
+			break
 		}
 	}
 

@@ -9,6 +9,9 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"time"
 )
 
@@ -42,6 +45,7 @@ func ihash(key string) int {
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
+
 	status := UNASSIGNED
 	// Get job from Coordinator
 	reply := JobReply{}
@@ -52,24 +56,23 @@ func Worker(mapf func(string, string) []KeyValue,
 			break
 		}
 		elapsedTime := time.Since(startTime)
-		if elapsedTime >= 60*time.Second {
+		if elapsedTime >= 10*time.Second {
 			fmt.Println("Worker timeout...")
 			break
 		}
 		time.Sleep(1 * time.Second)
 	}
 
-	// Open the file
-	file, err := os.Open(reply.FileLocation)
-	if err != nil {
-		fmt.Println("Unable to open file:", err)
-		return
-	}
-	defer file.Close()
-
 	// Map Job Retreived - Enter Map Routine
 	if reply.JobType == MAP_TASK {
-
+		fmt.Println("Worker received a map task!")
+		// Open the file
+		file, err := os.Open(reply.FileLocation)
+		if err != nil {
+			fmt.Println("Unable to open file:", err)
+			return
+		}
+		defer file.Close()
 		// Move to the desired offset
 		_, err = file.Seek(reply.FileOffset, io.SeekStart)
 		if err != nil {
@@ -79,7 +82,7 @@ func Worker(mapf func(string, string) []KeyValue,
 
 		// Read the data from the offset
 		buffer := make([]byte, reply.DataLength)
-		_, err := file.Read(buffer)
+		_, err = file.Read(buffer)
 		if err != nil && err != io.EOF {
 			fmt.Println("Error reading data from file:", err)
 			return
@@ -99,33 +102,121 @@ func Worker(mapf func(string, string) []KeyValue,
 			// Encode and store map data
 			reqBodyBytes := new(bytes.Buffer)
 			json.NewEncoder(reqBodyBytes).Encode(bucketMap[i])
-			temp_filename := fmt.Sprintf("%s_temp_%d_%d", reply.FileLocation, i, reply.JobId)
+			temp_filename := fmt.Sprintf("%s_temp_bucket%d_%d", reply.FileLocation, i, reply.JobId)
 			err = os.WriteFile(temp_filename, reqBodyBytes.Bytes(), 0644)
 			if err != nil {
 				status = UNASSIGNED
+			} else {
+				status = FINISHED
 			}
 		}
+		// Notify coordinator status
+		CallNotifyDone(reply.JobId, status)
+		fmt.Println("JobId: ", reply.JobId, " Finished with status: ", status)
+
 	}
 
 	// Reduce Job Retreived - Enter Reduce Routine
 	if reply.JobType == REDUCE_TASK {
+		// Define a map to hold all aggregated data
+		var kv_array ByKey
+
+		rnum := reply.NReduce
+
 		fmt.Println("Worker received a reduce task!")
-		// TODO Read M files for this R
-		// open file temp_R_(*M)_out.txt into buff
+		// Read M files for this R
+		// Specify the directory to scan
+		// Specify the directory to scan
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Println("Error getting current directory:", err)
+			return
+		}
+		dir := cwd
 
-		// TODO sort
-		//sort.Sort(ByKey(keyvalue_array))
+		// Create a regular expression to match files with "_bucketR_" where R is an integer
+		regexPattern := fmt.Sprintf("_bucket%d_", rnum)
+		regex, err := regexp.Compile(regexp.QuoteMeta(regexPattern))
+		if err != nil {
+			fmt.Println("Error compiling regex:", err)
+			return
+		}
+		// Walk through the directory
+		err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
 
-		// TODO append values for each KEY for this R and call map
+			// Check if the file name matches the pattern
+			if regex.MatchString(info.Name()) {
+				// Read the content of the file
+				data, err := os.ReadFile(path)
+				if err != nil {
+					fmt.Println("Error reading file:", err)
+					return err
+				}
+				var tempKVArray ByKey
+				// Decode the JSON data into a slice of KeyValue
+				if err := json.Unmarshal(data, &tempKVArray); err != nil {
+					fmt.Println("Error decoding JSON:", err)
+					return err
+				}
+				// Append all decoded key-values to the main slice
+				kv_array = append(kv_array, tempKVArray...)
 
-	}
+			}
 
-	// Notify coordinator status
-	ok := CallNotifyDone(reply.JobId, status)
-	fmt.Println("JobId: ", reply.JobId, " Finished with status: ", status)
-	if ok != 0 {
-		log.Fatal(err)
-	}
+			return nil
+		})
+
+		if err != nil {
+			fmt.Println("Error walking through directory:", err)
+		}
+
+		sort.Sort(kv_array)
+		// Temporary variable to store the current group of values
+		var tempValues []string
+		// Track the current key we are gathering values for
+		currentKey := ""
+		for _, kv := range kv_array {
+			// Check if we are still on the same key
+			if kv.Key == currentKey {
+				// Append the value to the temporary slice
+				tempValues = append(tempValues, kv.Value)
+			} else {
+				// If the key changes, first check if tempValues is not empty to handle the first group
+				if len(tempValues) > 0 {
+					//append values for each KEY for this R and call reduce
+					reduced_value := reducef(currentKey, tempValues)
+					var reduced_kv KeyValue = KeyValue{currentKey, reduced_value}
+					// Encode and store reduce data
+					reqBodyBytes := new(bytes.Buffer)
+					json.NewEncoder(reqBodyBytes).Encode(reduced_kv)
+					temp_filename := fmt.Sprintf("final_bucket_%d", rnum)
+					f, err := os.OpenFile(temp_filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+					if err != nil {
+						fmt.Printf("Error opening file: %s\n", err)
+						return
+					}
+					// Write data to file
+					if _, err := f.Write(reqBodyBytes.Bytes()); err != nil {
+						fmt.Printf("Error writing to file: %s\n", err)
+						f.Close() // close the file on error before exiting
+						return
+					}
+
+					status = FINISHED
+				}
+				// Reset the temporary variables for the next key
+				currentKey = kv.Key
+				tempValues = []string{kv.Value} // Start new slice with the new key's first value
+			}
+		}
+		// Notify coordinator status
+		CallNotifyDone(rnum, status)
+		fmt.Println("Rnum: ", rnum, " Finished with status: ", status)
+
+	} // endif MAP or REDUCE TASK
 
 }
 
