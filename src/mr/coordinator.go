@@ -51,8 +51,8 @@ func (c *Coordinator) AssignJob(proc_id *IntArg, reply *JobReply) error {
 			job = job.next
 		}
 		if job == nil {
-			fmt.Println("No Jobs to Assign")
 			reply.JobId = -1
+			reply.JobType = UNKNOWN_TASK
 			return nil
 		} else {
 			reply.JobId = job.job_id
@@ -69,8 +69,8 @@ func (c *Coordinator) AssignJob(proc_id *IntArg, reply *JobReply) error {
 			job = job.next
 		}
 		if job == nil {
-			fmt.Println("No Jobs to Assign")
 			reply.JobId = -1
+			reply.JobType = UNKNOWN_TASK
 			return nil
 		} else {
 			reply.JobId = job.job_id
@@ -286,6 +286,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 			break
 		}
 	}
+	fmt.Println("Reduce jobs are complete. Exiting...")
 
 	return &c
 }

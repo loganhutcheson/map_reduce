@@ -20,8 +20,9 @@ const (
 )
 
 const (
-	MAP_TASK    = 0
-	REDUCE_TASK = 1
+	UNKNOWN_TASK = -1
+	MAP_TASK     = 0
+	REDUCE_TASK  = 1
 )
 
 // A simple Integer argument

@@ -99,6 +99,8 @@ fi
 
 # wait for remaining workers and coordinator to exit.
 wait
+# LOGAN TODO - test 1
+exit 1
 
 #########################################################
 # now indexer
