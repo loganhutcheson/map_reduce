@@ -7,24 +7,20 @@ import (
 	"net/http"
 	"net/rpc"
 	"os"
+	"regexp"
 	"sync"
 	"time"
 )
 
-//var debug = true
-
 type Coordinator struct {
-	mJob      map_job
-	mHead     *map_job
-	rJob      reduce_job
-	rHead     *reduce_job
-	mu        sync.Mutex
-	numReduce int
-	mapDone   int
+	mapJobs    []map_job    // Slice of map jobs
+	reduceJobs []reduce_job // Slice of reduce jobs
+	numReduce  int          // Total number of reduce jobs
+	mapDone    int          // Count of completed map jobs
+	mu         sync.Mutex   // mutex to lock mapJobs and reduceJobs
 }
 
 type map_job struct {
-	next          *map_job
 	job_id        int
 	job_type      int
 	status        int
@@ -34,49 +30,84 @@ type map_job struct {
 }
 
 type reduce_job struct {
-	next   *reduce_job
-	job_id int
-	status int
-	rNum   int
+	job_id            int
+	status            int
+	intermediateFiles []string
+}
+
+func GetIntermediateFiles(rNum int) []string {
+	var matchedFiles []string
+	pattern := fmt.Sprintf(`^mr-(\d+)-%d$`, rNum)
+	regex, err := regexp.Compile(pattern)
+	if err != nil {
+		fmt.Println("Regex error:", err)
+		return nil
+	}
+
+	// Get the current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Error getting current working directory:", err)
+		return nil
+	}
+
+	// Read all files in the current directory
+	files, err := os.ReadDir(cwd)
+	if err != nil {
+		fmt.Println("Error reading directory:", err)
+		return nil
+	}
+
+	for _, file := range files {
+		if file.IsDir() {
+			continue // skip directories
+		}
+		fileName := file.Name()
+		if regex.MatchString(fileName) {
+			matchedFiles = append(matchedFiles, fileName)
+		}
+	}
+	fmt.Println("Matched Files:", matchedFiles)
+	return matchedFiles
 }
 
 // AssignJob Routine
 // assigns a map or reduce job to worker
 func (c *Coordinator) AssignJob(proc_id *IntArg, reply *JobReply) error {
+
+	// RPC lock
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	if c.mapDone == 0 {
-		job := c.mHead
-		for job != nil && job.status != UNASSIGNED {
-			job = job.next
-		}
-		if job == nil {
-			reply.JobId = -1
-			reply.JobType = UNKNOWN_TASK
-			return nil
-		} else {
-			reply.JobId = job.job_id
-			reply.FileLocation = job.file_location
-			reply.FileOffset = job.file_index
-			reply.DataLength = job.m_size
-			reply.NReduce = c.numReduce
-			job.status = ASSIGNED
-			reply.JobType = MAP_TASK
+		// Assign worker a map job
+		for i, job := range c.mapJobs {
+			if job.status == UNASSIGNED {
+				reply.JobId = job.job_id
+				reply.JobType = MAP_TASK
+				reply.FileLocation = job.file_location
+				reply.FileOffset = job.file_index
+				reply.DataLength = job.m_size
+				reply.NReduce = c.numReduce
+				// Mark this job as assigned
+				c.mapJobs[i].status = ASSIGNED
+				return nil
+			}
 		}
 	} else {
-		job := c.rHead
-		for job != nil && job.status != UNASSIGNED {
-			job = job.next
-		}
-		if job == nil {
-			reply.JobId = -1
-			reply.JobType = UNKNOWN_TASK
-			return nil
-		} else {
-			reply.JobId = job.job_id
-			reply.NReduce = job.rNum
-			job.status = ASSIGNED
-			reply.JobType = REDUCE_TASK
+		// Assign worker a reduce job
+		for i, job := range c.reduceJobs {
+			if job.status == UNASSIGNED {
+				reply.JobId = job.job_id
+				reply.JobType = REDUCE_TASK
+
+				reply.IntermediateFiles = job.intermediateFiles
+				fmt.Println("LOGAN worker job assigned with: ", reply.JobId, reply.JobType, reply.IntermediateFiles)
+
+				// Mark this job as assigned
+				c.reduceJobs[i].status = ASSIGNED
+				return nil
+			}
 		}
 	}
 
@@ -86,40 +117,35 @@ func (c *Coordinator) AssignJob(proc_id *IntArg, reply *JobReply) error {
 // WorkerDone - end condition
 // Processes the reply from worker
 func (c *Coordinator) WorkerDone(args *NotifyDoneArgs, reply *IntReply) error {
-	// Find matching job and store location
+
+	// RPC lock
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	if c.mapDone == 0 {
-		job := c.mHead
-		for {
-			if job == nil {
-				break
-			}
-			if job.job_id == args.JobId {
-				job.status = args.Status
-				job.file_location = args.Location
+		// Find matching map job
+		for i := range c.mapJobs {
+			if c.mapJobs[i].job_id == args.JobId {
+				c.mapJobs[i].status = args.Status
+				// c.mapJobs[i].file_location = args.Location TODO - store intermediate locations ?
 				return nil
 			}
-			job = job.next
 		}
 	} else {
-		job := c.rHead
-		for {
-			if job == nil {
-				break
-			}
-			if job.rNum == args.JobId {
-				job.status = args.Status
+		// Find matching reduce job
+		for i := range c.reduceJobs {
+			fmt.Println("LOGAN worker done reduce called with jobId", args.JobId)
+			if c.reduceJobs[i].job_id == args.JobId {
+				fmt.Println("LOGAN setting reduce as complete")
+				c.reduceJobs[i].status = args.Status
 				return nil
 			}
-			job = job.next
 		}
 	}
 
-	// Notify worker it can die
+	// Notify worker it's job is done
 	reply.Status = 0
 	return nil
-
 }
 
 // Start a thread that listens for RPCs from worker.go
@@ -144,54 +170,37 @@ func (c *Coordinator) Done() bool {
 	time.Sleep(5 * time.Second)
 
 	// Iterate over the mr_job list and check status of job
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.mapDone == 0 {
-		job := c.mHead
 		total := 0
 		complete := 0
 
-		for {
-			if job == nil {
-				break
-			}
+		for _, job := range c.mapJobs {
 			total++
 			if job.status == FINISHED {
 				complete++
 			} else {
 				ret = false
 			}
-			job = job.next
-
 		}
-
-		fmt.Printf("Master Stats: \n"+
-			"  Total M Jobs: %d \n"+
-			"  Complete M Jobs: %d\n", total, complete)
+		fmt.Printf("Coordinator Status: \n"+
+			"  Total Map Jobs: %d \n"+
+			"  Complete Map Jobs: %d\n", total, complete)
 
 	} else {
-		job := c.rHead
 		total := 0
 		complete := 0
 
-		for {
-			if job == nil {
-				break
-			}
+		for _, job := range c.reduceJobs {
 			total++
 			if job.status == FINISHED {
 				complete++
 			} else {
 				ret = false
 			}
-			job = job.next
-
 		}
-
-		fmt.Printf("Master Stats: \n"+
-			"  Total R Jobs: %d \n"+
-			"  Complete R Jobs: %d\n", total, complete)
-
+		fmt.Printf("Coordinator Status: \n"+
+			"  Total Reduce Jobs: %d \n"+
+			"  Complete Reduce Jobs: %d\n", total, complete)
 	}
 
 	return ret
@@ -203,15 +212,13 @@ func (c *Coordinator) Done() bool {
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	c := Coordinator{}
-	c.numReduce = nReduce
 
-	var map_list *map_job
+	// Parameter values
+	map_input_size := int64(64 * 1024 * 1024) // Map input data size == 64MB
+	job_id := 1000                            // Starting map job ID
+	c.numReduce = nReduce                     // Number of reduce tasks
 
-	// Default values
-	m_size := int64(64 * 1024 * 1024) // 64MB
-	job_id := 1000
-
-	// Split input data into "M" pieces of m_size
+	// Read input data files
 	for _, file := range files {
 		f, err := os.Open(file)
 		if err != nil {
@@ -228,26 +235,18 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 		fileSize := fi.Size()
 		var offset int64 = 0
-		var chunkSize int64 = m_size
-		// Loop through the file in m_size segments
+		var chunkSize int64 = map_input_size
+		// Split input data into "M" pieces of map_input_size
 		for offset < fileSize {
 
 			if fileSize-offset < chunkSize {
 				chunkSize = fileSize - offset
 			}
 
-			// add map job to linked list
-			map_job := map_job{nil, job_id, MAP_TASK, UNASSIGNED,
-				file, offset, m_size}
-			if c.mJob.job_id == 0 {
-				c.mJob = map_job
-				c.mHead = &c.mJob
-				map_list = c.mHead
-			} else {
-				map_list.next = &map_job
-				map_list = map_list.next
-			}
-
+			// Add new map job to coordinator's map slice
+			map_job := map_job{job_id, MAP_TASK, UNASSIGNED,
+				file, offset, map_input_size}
+			c.mapJobs = append(c.mapJobs, map_job)
 			offset += chunkSize
 			job_id = job_id + 1
 		}
@@ -260,33 +259,34 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	// Done calls periodically
 	for {
 		if c.Done() {
+			fmt.Println("Map jobs are complete. Creating reduce jobs...")
 			break
 		}
 	}
-	fmt.Println("Map jobs are complete. Creating reduce jobs...")
-	c.mapDone = 1
 
-	// Create the reduce jobs
-	var reduce_list *reduce_job
-	for i := 0; i < nReduce; i++ {
-		reduce_job := reduce_job{nil, job_id, UNASSIGNED, i}
-		// Add reduce job to linked list
-		if c.rJob.job_id == 0 {
-			c.rJob = reduce_job
-			c.rHead = &c.rJob
-			reduce_list = c.rHead
-		} else {
-			reduce_list.next = &reduce_job
-			reduce_list = reduce_list.next
-		}
+	c.mapDone = 1 // Trigger reduce stage
+
+	// grab RPC lock while creating reduce jobs
+	c.mu.Lock()
+	// Generate nReduce reduce jobs
+	for rNum := 0; rNum < nReduce; rNum++ {
+		// grep for the intermediate files of bucket R
+		// TODO store this from RPC of map worker done
+		var intermediateFiles = GetIntermediateFiles(rNum)
+		reduce_job := reduce_job{rNum, UNASSIGNED, intermediateFiles}
+		// Add new reduce job to coordinator's reduce slice
+		c.reduceJobs = append(c.reduceJobs, reduce_job)
 	}
+	// unlock RPC lock to let reduce workers get jobs
+	c.mu.Unlock()
+
 	// Done calls periodically
 	for {
 		if c.Done() {
+			fmt.Println("Reduce jobs are complete. Exiting...")
 			break
 		}
 	}
-	fmt.Println("Reduce jobs are complete. Exiting...")
 
 	return &c
 }

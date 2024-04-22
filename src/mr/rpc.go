@@ -20,9 +20,9 @@ const (
 )
 
 const (
-	UNKNOWN_TASK = -1
-	MAP_TASK     = 0
-	REDUCE_TASK  = 1
+	UNKNOWN_TASK = 0
+	MAP_TASK     = 1
+	REDUCE_TASK  = 2
 )
 
 // A simple Integer argument
@@ -38,12 +38,13 @@ type IntReply struct {
 // The Coordinate replies with Map Job request
 // and gives details on the job to perform.
 type JobReply struct {
-	JobId        int
-	JobType      int
-	FileLocation string
-	FileOffset   int64
-	DataLength   int64
-	NReduce      int
+	JobId             int
+	JobType           int
+	FileLocation      string
+	FileOffset        int64
+	DataLength        int64
+	NReduce           int
+	IntermediateFiles []string
 }
 
 // The worker must notify the Coordinator
