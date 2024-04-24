@@ -65,7 +65,7 @@ func Worker(mapf func(string, string) []KeyValue,
 			}
 			elapsedTime := time.Since(startTime)
 			if elapsedTime >= 5*time.Second {
-				fmt.Println("Worker timeout. Exiting...")
+				fmt.Println("WORKER: timeout. Exiting...")
 				break
 			}
 			time.Sleep(1 * time.Second)
@@ -102,7 +102,7 @@ func Worker(mapf func(string, string) []KeyValue,
 			}
 
 			// Map the input data
-			keyvalue_array := mapf("", string(buffer))
+			keyvalue_array := mapf(file.Name(), string(buffer))
 
 			// Randomize the mapped kvs into R buckets
 			bucketMap := make(BucketMap, reply.NReduce)
@@ -125,7 +125,7 @@ func Worker(mapf func(string, string) []KeyValue,
 			}
 			// Notify coordinator status
 			CallNotifyDone(reply.JobId, status)
-			fmt.Println("JobId: ", reply.JobId, " Finished with status: ", status)
+			fmt.Println("WORKER: ", reply.JobId, "Done with status: ", status)
 
 		}
 
@@ -138,7 +138,6 @@ func Worker(mapf func(string, string) []KeyValue,
 			// Read M files for this R bucket:
 			for _, file := range files {
 				// Read the content of the file
-				fmt.Printf("READ file %s", file)
 				data, err := os.ReadFile(file)
 				if err != nil {
 					fmt.Println("Error reading file:", err)
@@ -208,7 +207,7 @@ func Worker(mapf func(string, string) []KeyValue,
 
 			// Notify coordinator status
 			CallNotifyDone(reply.JobId, status)
-			fmt.Println("Worker: ", reply.JobId, " Finished with status: ", status)
+			fmt.Println("WORKER: ", reply.JobId, "Finished with status: ", status)
 
 		} // end MAP or REDUCE task
 	} // end for
@@ -220,9 +219,11 @@ func CallGetJob(reply *JobReply) {
 	ok := call("Coordinator.AssignJob", &arg, &reply)
 
 	if ok {
-		fmt.Printf("WORKER: Assigned:\n"+
-			"JobId: %v File: %s, Filesize: %v Type: %d\n",
-			reply.JobId, reply.FileLocation, reply.FileOffset, reply.JobType)
+		if reply.JobId != 0 {
+			fmt.Printf("WORKER: %v Assigned "+
+				"File: %s, Filesize: %v Type: %d\n",
+				reply.JobId, reply.FileLocation, reply.FileOffset, reply.JobType)
+		}
 	}
 }
 

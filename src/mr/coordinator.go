@@ -67,7 +67,6 @@ func GetIntermediateFiles(rNum int) []string {
 			matchedFiles = append(matchedFiles, fileName)
 		}
 	}
-	fmt.Println("Matched Files:", matchedFiles)
 	return matchedFiles
 }
 
@@ -100,10 +99,7 @@ func (c *Coordinator) AssignJob(proc_id *IntArg, reply *JobReply) error {
 			if job.status == UNASSIGNED {
 				reply.JobId = job.job_id
 				reply.JobType = REDUCE_TASK
-
 				reply.IntermediateFiles = job.intermediateFiles
-				fmt.Println("LOGAN worker job assigned with: ", reply.JobId, reply.JobType, reply.IntermediateFiles)
-
 				// Mark this job as assigned
 				c.reduceJobs[i].status = ASSIGNED
 				return nil
@@ -134,9 +130,7 @@ func (c *Coordinator) WorkerDone(args *NotifyDoneArgs, reply *IntReply) error {
 	} else {
 		// Find matching reduce job
 		for i := range c.reduceJobs {
-			fmt.Println("LOGAN worker done reduce called with jobId", args.JobId)
 			if c.reduceJobs[i].job_id == args.JobId {
-				fmt.Println("LOGAN setting reduce as complete")
 				c.reduceJobs[i].status = args.Status
 				return nil
 			}
@@ -182,9 +176,9 @@ func (c *Coordinator) Done() bool {
 				ret = false
 			}
 		}
-		fmt.Printf("Coordinator Status: \n"+
-			"  Total Map Jobs: %d \n"+
-			"  Complete Map Jobs: %d\n", total, complete)
+		fmt.Printf("COORDINATOR: Status: "+
+			"Total Map Jobs: %d "+
+			"Complete Map Jobs: %d\n", total, complete)
 
 	} else {
 		total := 0
@@ -198,9 +192,9 @@ func (c *Coordinator) Done() bool {
 				ret = false
 			}
 		}
-		fmt.Printf("Coordinator Status: \n"+
-			"  Total Reduce Jobs: %d \n"+
-			"  Complete Reduce Jobs: %d\n", total, complete)
+		fmt.Printf("COORDINATOR: Status: "+
+			"Total Reduce Jobs: %d "+
+			"Complete Reduce Jobs: %d\n", total, complete)
 	}
 
 	return ret
@@ -251,7 +245,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 			job_id = job_id + 1
 		}
 	}
-	fmt.Println("Coordinator is ready to assign Map jobs.")
+	fmt.Println("COORDINATOR: ready to assign Map jobs.")
 
 	// Thread that listens for Jobs
 	c.server()
@@ -259,7 +253,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	// Done calls periodically
 	for {
 		if c.Done() {
-			fmt.Println("Map jobs are complete. Creating reduce jobs...")
+			fmt.Println("COORDINATOR: Map jobs are complete. Creating reduce jobs...")
 			break
 		}
 	}
@@ -283,7 +277,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	// Done calls periodically
 	for {
 		if c.Done() {
-			fmt.Println("Reduce jobs are complete. Exiting...")
+			fmt.Println("COORDINATOR: Reduce jobs are complete. Exiting...")
 			break
 		}
 	}
