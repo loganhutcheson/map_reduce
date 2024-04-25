@@ -123,17 +123,14 @@ func Worker(mapf func(string, string) []KeyValue,
 					status = FINISHED
 				}
 			}
-			// Notify coordinator status
-			CallNotifyDone(reply.JobId, status)
-			fmt.Println("WORKER: ", reply.JobId, "Done with status: ", status)
-
 		}
 
-		// Reduce Job Retreived - Enter Reduce Routine
+		// Reduce Job Assigned - Enter Reduce Routine
 		if reply.JobType == REDUCE_TASK {
 
 			files := reply.IntermediateFiles // Intermediate files
 			var kv_array ByKey               // map to hold all aggregated temp data for R
+			var prevKey string
 
 			// Read M files for this R bucket:
 			for _, file := range files {
@@ -152,7 +149,13 @@ func Worker(mapf func(string, string) []KeyValue,
 				// Append all decoded key-values to the main slice
 				kv_array = append(kv_array, tempKVArray...)
 			}
-
+			if kv_array.Len() == 0 {
+				// No intermediate data, just return success
+				// Notify coordinator status
+				CallNotifyDone(reply.JobId, FINISHED)
+				fmt.Println("WORKER: ", reply.JobId, "Done with status: ", status)
+				continue // Go grab another job
+			}
 			// Sort the appended temp mapped kv pairs
 			sort.Sort(kv_array)
 
@@ -167,7 +170,7 @@ func Worker(mapf func(string, string) []KeyValue,
 
 			// Iterate through all kv in the temp bucket, calling reduce when key changes
 			var curValues []string
-			prevKey := kv_array[0].Key
+			prevKey = kv_array[0].Key
 			for _, kv := range kv_array {
 
 				// Check if we are still on the same key
@@ -201,15 +204,15 @@ func Worker(mapf func(string, string) []KeyValue,
 				// Write data to file
 				fmt.Fprintf(f, "%v %v\n", prevKey, reduced_value)
 			}
-
 			// Mark reduce job as complete
 			status = FINISHED
 
-			// Notify coordinator status
-			CallNotifyDone(reply.JobId, status)
-			fmt.Println("WORKER: ", reply.JobId, "Finished with status: ", status)
-
 		} // end MAP or REDUCE task
+
+		// Notify coordinator status
+		CallNotifyDone(reply.JobId, status)
+		fmt.Println("WORKER: ", reply.JobId, "Done with status: ", status)
+
 	} // end for
 }
 
