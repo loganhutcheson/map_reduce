@@ -56,8 +56,8 @@ func Worker(mapf func(string, string) []KeyValue,
 				// Got a MAP_TASK or REDUCE_TASK
 				break
 			} else {
-				// Try for 10 seconds before exiting.
-				if retry_count >= 10 {
+				// Try for 30 seconds before exiting.
+				if retry_count >= 30 {
 					keepRunning = false
 					break
 				}
@@ -123,6 +123,11 @@ func Worker(mapf func(string, string) []KeyValue,
 					status = FINISHED
 				}
 			}
+			// Notify coordinator status
+			ret := CallNotifyDone(reply.JobId, status)
+			fmt.Println("WORKER: ", reply.JobId, "Done with status: ", status,
+				"Coordinator returned ", ret)
+			continue // go get another job
 		}
 
 		// Reduce Job Assigned - Enter Reduce Routine
@@ -152,21 +157,22 @@ func Worker(mapf func(string, string) []KeyValue,
 			if kv_array.Len() == 0 {
 				// No intermediate data, just return success
 				// Notify coordinator status
-				CallNotifyDone(reply.JobId, FINISHED)
-				fmt.Println("WORKER: ", reply.JobId, "Done with status: ", status)
+				ret := CallNotifyDone(reply.JobId, FINISHED)
+				fmt.Println("WORKER: ", reply.JobId, "Done with status: ", status,
+					"Coordinator returned ", ret)
 				continue // Go grab another job
 			}
 			// Sort the appended temp mapped kv pairs
 			sort.Sort(kv_array)
 
 			// Append all reduces kv to mr-out-X file
-			temp_filename := fmt.Sprintf("mr-out-%d", reply.JobId)
-			file, err := os.OpenFile(temp_filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			final_filename := fmt.Sprintf("mr-out-%d", reply.JobId)
+			temp_file, err := os.CreateTemp("", "temp-mr-out-")
 			if err != nil {
 				fmt.Printf("Error opening file: %s\n", err)
 				return
 			}
-			defer file.Close()
+			defer temp_file.Close()
 
 			// Iterate through all kv in the temp bucket, calling reduce when key changes
 			var curValues []string
@@ -183,7 +189,7 @@ func Worker(mapf func(string, string) []KeyValue,
 						//append values for each KEY for this R and call reduce
 						reduced_value := reducef(prevKey, curValues)
 						// Write data to file
-						fmt.Fprintf(file, "%v %v\n", prevKey, reduced_value)
+						fmt.Fprintf(temp_file, "%v %v\n", prevKey, reduced_value)
 					}
 					// Reset the temporary variables for the next key
 					prevKey = kv.Key
@@ -193,27 +199,28 @@ func Worker(mapf func(string, string) []KeyValue,
 
 			// Flush the last key values as well
 			if len(curValues) > 0 {
-				//append values for each KEY for this R and call reduce
 				reduced_value := reducef(prevKey, curValues)
-				temp_filename := fmt.Sprintf("mr-out-%d", reply.JobId)
-				f, err := os.OpenFile(temp_filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-				if err != nil {
-					fmt.Printf("Error opening file: %s\n", err)
-					return
-				}
-				// Write data to file
-				fmt.Fprintf(f, "%v %v\n", prevKey, reduced_value)
+				fmt.Fprintf(temp_file, "%v %v\n", prevKey, reduced_value)
 			}
+
 			// Mark reduce job as complete
 			status = FINISHED
-
+			// Notify coordinator status
+			ret := CallNotifyDone(reply.JobId, status)
+			if ret == -1 {
+				// Go get another job, this one is already finished
+				continue
+			}
+			// Rename the temporary file to the final filename atomically
+			if err := os.Rename(temp_file.Name(), final_filename); err != nil {
+				log.Fatal(err)
+			}
+			fmt.Println("WORKER: ", reply.JobId, "Done with status: ", status,
+				"Coordinator returned ", ret)
+			continue // go get another job
 		} // end MAP or REDUCE task
 
-		// Notify coordinator status
-		CallNotifyDone(reply.JobId, status)
-		fmt.Println("WORKER: ", reply.JobId, "Done with status: ", status)
-
-	} // end for
+	} // end worker for
 }
 
 // Ask the coordinator for a map job
@@ -238,7 +245,6 @@ func CallNotifyDone(job_id int, status int) int {
 	args.JobId = job_id
 	args.Status = status
 	ok := call("Coordinator.WorkerDone", &args, &reply)
-
 	if ok {
 		return reply.Status
 	} else {

@@ -27,12 +27,14 @@ type map_job struct {
 	file_location string
 	file_index    int64
 	m_size        int64
+	timeout       int
 }
 
 type reduce_job struct {
 	job_id            int
 	status            int
 	intermediateFiles []string
+	timeout           int
 }
 
 func GetIntermediateFiles(rNum int) []string {
@@ -122,6 +124,10 @@ func (c *Coordinator) WorkerDone(args *NotifyDoneArgs, reply *IntReply) error {
 		// Find matching map job
 		for i := range c.mapJobs {
 			if c.mapJobs[i].job_id == args.JobId {
+				if c.mapJobs[i].status == FINISHED {
+					// Return -1 to worker for an already completed job
+					reply.Status = -1
+				}
 				c.mapJobs[i].status = args.Status
 				// c.mapJobs[i].file_location = args.Location TODO - store intermediate locations ?
 				return nil
@@ -131,7 +137,14 @@ func (c *Coordinator) WorkerDone(args *NotifyDoneArgs, reply *IntReply) error {
 		// Find matching reduce job
 		for i := range c.reduceJobs {
 			if c.reduceJobs[i].job_id == args.JobId {
-				c.reduceJobs[i].status = args.Status
+				if c.reduceJobs[i].status == FINISHED {
+					// Return -1 to worker for an already completed job
+					reply.Status = -1
+				} else {
+					reply.Status = 0
+					c.reduceJobs[i].status = args.Status
+				}
+
 				return nil
 			}
 		}
@@ -168,10 +181,18 @@ func (c *Coordinator) Done() bool {
 		total := 0
 		complete := 0
 
-		for _, job := range c.mapJobs {
+		for i, job := range c.mapJobs {
 			total++
 			if job.status == FINISHED {
 				complete++
+			} else if job.status == ASSIGNED {
+				// CRASH: ~10 seconds overdue (5sec poll * 2)
+				if job.timeout >= 2 {
+					// put job back in queue
+					c.mapJobs[i].status = UNASSIGNED
+				}
+				c.mapJobs[i].timeout++
+				ret = false
 			} else {
 				ret = false
 			}
@@ -184,10 +205,18 @@ func (c *Coordinator) Done() bool {
 		total := 0
 		complete := 0
 
-		for _, job := range c.reduceJobs {
+		for i, job := range c.reduceJobs {
 			total++
 			if job.status == FINISHED {
 				complete++
+			} else if job.status == ASSIGNED {
+				// CRASH: ~10 seconds overdue (5sec * 2)
+				if job.timeout >= 2 {
+					// put job back in queue
+					c.reduceJobs[i].status = UNASSIGNED
+				}
+				c.reduceJobs[i].timeout++
+				ret = false
 			} else {
 				ret = false
 			}
@@ -239,7 +268,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 			// Add new map job to coordinator's map slice
 			map_job := map_job{job_id, MAP_TASK, UNASSIGNED,
-				file, offset, map_input_size}
+				file, offset, chunkSize, 0}
 			c.mapJobs = append(c.mapJobs, map_job)
 			offset += chunkSize
 			job_id = job_id + 1
@@ -267,7 +296,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		// grep for the intermediate files of bucket R
 		// TODO store this from RPC of map worker done
 		var intermediateFiles = GetIntermediateFiles(rNum)
-		reduce_job := reduce_job{rNum, UNASSIGNED, intermediateFiles}
+		reduce_job := reduce_job{rNum, UNASSIGNED, intermediateFiles, 0}
 		// Add new reduce job to coordinator's reduce slice
 		c.reduceJobs = append(c.reduceJobs, reduce_job)
 	}
